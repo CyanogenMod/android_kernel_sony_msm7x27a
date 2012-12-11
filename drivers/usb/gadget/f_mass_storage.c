@@ -322,6 +322,9 @@ static int csw_hack_sent;
 #endif
 /*-------------------------------------------------------------------------*/
 
+extern unsigned int fih_get_power_on_cause(void);/*MTD-CONN-EH-POWEROFFCHARGING-01+*/
+#define PWR_ON_EVENT_USB_CHG 0x20/*MTD-CONN-EH-POWEROFFCHARGING-01+*/
+
 //MTD-CONN-MW-SUT-00+{
 #define SC_READ_NV              		0xf0
 
@@ -538,6 +541,7 @@ static u8 check_external_storage(void) {
 	*/
 	struct file *ext_storage_file = NULL;
 	static const char* ext_storage_file_node = "/dev/block/mmcblk1";
+	int ret = 0;  /* ++MTD_Connectivity_FY_USB-IF_S3/4_resuming_workaourd_01 */
 
     printk(KERN_INFO "%s(): start\n", __func__);
 
@@ -547,15 +551,17 @@ static u8 check_external_storage(void) {
 	if(IS_ERR(ext_storage_file))
 	{
 		printk(KERN_INFO "%s(): EXTERNAL_STORAGE_STATE doesn't exist\n", __func__);
-		return 0;
+		return 0;  //MTD-CONN-EH-USBIF_WORKAROUND-00* /* ++MTD_Connectivity_FY_USB-IF_S3/4_resuming_workaourd_01 */
 	}
 	else
 	{
 		printk(KERN_INFO "%s(): EXTERNAL_STORAGE_STATE exist \n",__func__);
-		return 1;
+		ret = 1;  /* ++MTD_Connectivity_FY_USB-IF_S3/4_resuming_workaourd_01 */
 	}
 
 	filp_close(ext_storage_file, NULL);
+
+	return ret;  /* ++MTD_Connectivity_FY_USB-IF_S3/4_resuming_workaourd_01 */
 	
 
 	
@@ -1105,6 +1111,15 @@ static int do_write(struct fsg_common *common)
         //MTD-CONN-EH-PCCOMPANION-01*}
 	amount_left_to_req = common->data_size_from_cmnd;
 	amount_left_to_write = common->data_size_from_cmnd;
+    /* MTD-Connectivity-FY-USB_WHQL_workaround++ */
+	if (curlun->random_write_count >= RANDOM_WRITE_COUNT_TO_BE_FLUSHED)
+		fsg_lun_fsync_sub(curlun);
+
+	/* Detect non-sequential write */
+	if (curlun->last_offset != file_offset)
+		curlun->random_write_count++;
+	curlun->last_offset = file_offset + amount_left_to_write;
+	/* MTD-Connectivity-FY-USB_WHQL_workaround-- */
 
 	while (amount_left_to_write > 0) {
 
@@ -2268,7 +2283,7 @@ static int check_command(struct fsg_common *common, int cmnd_size,
 	/* If the medium isn't mounted and the command needs to access
 	 * it, return an error. */
 	if (curlun && !fsg_lun_is_open(curlun) && needs_medium) {
-		if(curlun->attached_external_storage) {
+		if(curlun->attached_external_storage && (fih_get_power_on_cause() != PWR_ON_EVENT_USB_CHG)) {/*MTD-CONN-EH-POWEROFFCHARGING-01**/
 			printk(KERN_INFO "SCSI command:%s WARNING SS_SCSI_SENSE_OPERATION_IN_PROGRESS\n", __func__);
 		    curlun->sense_data = SS_SCSI_SENSE_OPERATION_IN_PROGRESS;
 		}else {

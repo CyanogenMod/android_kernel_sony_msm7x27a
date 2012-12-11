@@ -367,17 +367,17 @@ struct fih_i2c_reg_conf mt9v115_sub_init_settings_array[] = {
     { 0xA068, 0x7080, WORD_LEN, 0 },
     //PA Settings
     { 0xA020, 0x4600, WORD_LEN, 0 },
-    { 0xA07A, 0x1014, WORD_LEN, 0 },
+    { 0xA07A, 0x0114, WORD_LEN, 0 },// 0x1114 0827 improve sharpness //FIH-SW3-MM-UW-fine tune+
     { 0xA081, 0x1E50, WORD_LEN, 0 },
     { 0xA0B1, 0x105A, WORD_LEN, 0 },
     { 0xA0B3, 0x105A, WORD_LEN, 0 },
     { 0xA0B5, 0x105A, WORD_LEN, 0 },
     { 0xA0B7, 0x1050, WORD_LEN, 0 },
-    { 0xA05F, 0x6400, WORD_LEN, 0 },
+    { 0xA05F, 0x9600, WORD_LEN, 0 },// 0x6400 0829 scott fine tune //FIH-SW3-MM-UW-fine tune+
     { 0xA0B9, 0x0028, WORD_LEN, 0 },
     { 0xA0BB, 0x0080, WORD_LEN, 0 },
     { 0xA085, 0x0008, WORD_LEN, 0 },
-    { 0xA07C, 0x0401, WORD_LEN, 0 },
+    { 0xA07C, 0x0701, WORD_LEN, 0 },// 0x0401 0829 improve sharpness //FIH-SW3-MM-UW-fine tune+
     //AE Settings
     { 0x9003, 0x2001, WORD_LEN, 0 },
     { 0xA027, 0x002A, WORD_LEN, 0 },
@@ -425,6 +425,23 @@ struct fih_i2c_reg_conf mt9v115_stream_stop_array[] = {
 };
 /*MM-UW-improve camera performance-00-*/
 
+#if 1//FIH-SW-MM-MC-PortingNewSettingFor15And30FPS-00*{
+struct fih_i2c_reg_conf mt9v115_fps_30_settings_array [] = {
+    { 0x300A, 0x01F9, WORD_LEN, 0 },
+    { 0x098E, 0x2076, WORD_LEN, 0 },
+    { 0xA076, 0x0003, WORD_LEN, 0 },
+    { 0xA078, 0x0004, WORD_LEN, 0 },
+    { 0xA01A, 0x0003, WORD_LEN, 0 }
+};
+
+struct fih_i2c_reg_conf mt9v115_fps_15_settings_array [] = {
+    { 0x300A, 0x03BE, WORD_LEN, 0 },
+    { 0x098E, 0x2076, WORD_LEN, 0 },
+    { 0xA076, 0x0006, WORD_LEN, 0 },
+    { 0xA078, 0x0007, WORD_LEN, 0 },
+    { 0xA01A, 0x0006, WORD_LEN, 0 }
+};
+#else
 /* FIH-SW3-MM-SL-SetFPSForRecordMMS-01+{ */	
 struct fih_i2c_reg_conf mt9v115_fps_30_settings_array [] = {
     { 0x300A, 0x01F9, WORD_LEN, 0 },
@@ -462,6 +479,7 @@ struct fih_i2c_reg_conf mt9v115_fps_15_settings_array [] = {
     { 0xA01A, 0x06,   BYTE_LEN, 0 }
 };
 /* FIH-SW3-MM-SL-SetFPSForRecordMMS-01+} */	
+#endif//FIH-SW-MM-MC-PortingNewSettingFor15And30FPS-00*}
 
 struct mt9v115_reg mt9v115_regs = {
     .reg_init_tbl = mt9v115_init_settings_array,

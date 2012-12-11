@@ -59,10 +59,14 @@
 /* FIH-SW-MM-VH-DISPLAY-05* */
 
 #define INIT_IMAGE_FILE "/logo.rle" /* FIH-SW2-MM-KW-CDF_logo-00+ */
-
+/* FIH-SW2-MM-KW-RGBA8888-00+{ */
+#if defined(CONFIG_FB_MSM_DEFAULT_DEPTH_RGBA8888)
+extern int fih_load_565rle_image_to_RGBA8888(char *filename);
+#else
 extern int load_565rle_image(char *filename);
 extern int fih_load_565rle_image(char *filename);/*MTD-MM-CL-DrawLogo-00+ */
-
+#endif
+/* FIH-SW2-MM-KW-RGBA8888-00-} */
 #endif
 
 #ifdef CONFIG_FB_MSM_TRIPLE_BUFFER
@@ -172,11 +176,11 @@ static void msmfb_early_resume_work_func(struct work_struct *work);
 #endif
 /* FIH-SW3-MM-NC-DEC_TIME-00-]- */
 
-/* FIH-SW-MM-VH-DISPLAY-18*[ */
-#if (defined(CONFIG_FIH_SW_DISPLAY_LCM_ID_CHECK) || defined(CONFIG_FIH_SW_DISPLAY_CABC))
+/* FIH-SW-MM-VH-DISPLAY-40*[ */
+#if defined(CONFIG_FIH_SW_DISPLAY_CABC)
 static struct msm_fb_panel_data *gmsm_fb_panel_data;
 #endif
-/* FIH-SW-MM-VH-DISPLAY-18*] */
+/* FIH-SW-MM-VH-DISPLAY-40*] */
 
 /* FIH-SW-MM-VH-DISPLAY-21*[ */
 #ifdef CONFIG_FIH_SW_DISPLAY_CABC_TOOLBOX
@@ -270,7 +274,13 @@ int draw_logo(struct fb_info *fbi)
 {
 	int retVal = 0;
 	printk(KERN_ERR "[DISPLAY] %s\n", __func__);
+/* FIH-SW2-MM-KW-RGBA8888-00+{ */
+#if defined(CONFIG_FB_MSM_DEFAULT_DEPTH_RGBA8888)
+    fih_load_565rle_image_to_RGBA8888(INIT_IMAGE_FILE);
+#else
 	fih_load_565rle_image(INIT_IMAGE_FILE);  /* Flip buffer *//*MTD-MM-CL-DrawLogo-00* */
+#endif
+/* FIH-SW2-MM-KW-RGBA8888-00-} */
 	retVal = msm_fb_pan_display(&fbi->var, fbi);
 
 	return retVal;
@@ -890,7 +900,13 @@ static ssize_t display_show_battery(struct device *dev,
 	case BATTERY_LEVEL_04:
 	case BATTERY_LEVEL_05:
 	case BATTERY_FULL:
+/* FIH-SW2-MM-KW-RGBA8888-00+{ */
+#if defined(CONFIG_FB_MSM_DEFAULT_DEPTH_RGBA8888)
+        fih_load_565rle_image_to_RGBA8888(rlefile);
+#else
 		fih_load_565rle_image(rlefile);
+#endif
+/* FIH-SW2-MM-KW-RGBA8888-00-} */
 		msm_fb_pan_display(&fbi->var, fbi);
 		break;
 /*MTD-MM-CL-DrawLogo-00*]*/
@@ -962,8 +978,8 @@ static DEVICE_ATTR(panel_control, 0644, NULL, panel_power_control);
 static struct msm_fb_platform_data *msm_fb_pdata;
 unsigned char hdmi_prim_display;
 
-/* FIH-SW-MM-VH-DISPLAY-39*[ */
-#ifdef CONFIG_FIH_SW_DISPLAY_LCM_ID_CHECK
+/* FIH-SW-MM-VH-DISPLAY-42*[ */
+#if (defined(CONFIG_FIH_SW_DISPLAY_LCM_ID_CHECK) || defined(CONFIG_FIH_SW_DISPLAY_AUO_LCM_HEALTHY_CHECK))
 enum {
 	LCM_ID_DA_MES_CMI_DP = 0x0A,
 	LCM_ID_DA_MES_AUO_0B = 0x0B,
@@ -973,34 +989,59 @@ enum {
 	LCM_ID_DA_JLO_CMI = 0x43,
 	LCM_ID_DA_TAP_CMI = 0x54,
 };
-int msm_fb_check_panel_id(struct msm_fb_data_type *mfd, struct fb_info *fbi)
+int msm_fb_check_lcm_healthy(struct msm_fb_data_type *mfd, struct fb_info *fbi)
 {
-	static int retVal = 0;
+	int retVal = 0;
 	
 	int duration = 0;
 	struct timespec cur_time = {0, 0};
 	static struct timespec pre_time = {0, 0};
 
-	if((retVal ==0) ||(retVal == LCM_ID_DA_MES_AUO_0B) || (retVal == LCM_ID_DA_MES_AUO_0D))
+	struct msm_fb_panel_data *pdata =
+		(struct msm_fb_panel_data *)mfd->pdev->dev.platform_data;
+
+#if defined(CONFIG_FIH_SW_DISPLAY_LCM_ID_CHECK)
+	if(mfd->panel_info.lcm_model == (__u32)LCM_ID_DA_TAP_CMI){
+		cur_time = current_kernel_time();
+		duration = cur_time.tv_sec - pre_time.tv_sec;
+
+		if (duration < 2)
+			return 0;
+		else
+			pre_time = cur_time;
+
+		down(&mfd->sem);
+		if(pdata->get_id != NULL) {
+			retVal = pdata->get_id(mfd);
+		}
+		up(&mfd->sem);
+
+	}
+#endif
+#if defined(CONFIG_FIH_SW_DISPLAY_AUO_LCM_HEALTHY_CHECK)
+	if((mfd->panel_info.lcm_model == (__u32)LCM_ID_DA_MES_AUO_0B) ||
+		(mfd->panel_info.lcm_model == (__u32)LCM_ID_DA_MES_AUO_0D))
 	{
-		if(gmsm_fb_panel_data->get_id != NULL) {
 			cur_time = current_kernel_time();
 			duration = cur_time.tv_sec - pre_time.tv_sec;
 			
 			if (duration < 2)
 				return 0;
-	
-			pre_time = cur_time;
-	
+			else
+				pre_time = cur_time;
+
 			down(&mfd->sem);
-			retVal = gmsm_fb_panel_data->get_id(mfd);
+			if(pdata->get_healthy != NULL) {
+				retVal = pdata->get_healthy(mfd);
+			}
 			up(&mfd->sem);
-		}
 	}
+#endif
+
 	return retVal;
 }
 #endif
-/* FIH-SW-MM-VH-DISPLAY-39*] */
+/* FIH-SW-MM-VH-DISPLAY-42*] */
 
 int msm_fb_detect_client(const char *name)
 {
@@ -1247,7 +1288,8 @@ static int msm_fb_probe(struct platform_device *pdev)
 	msm_fb_create_sysfs(pdev);
     
 /* FIH-SW-MM-VH-DISPLAY-18*[ */
-#if (defined(CONFIG_FIH_SW_DISPLAY_LCM_ID_CHECK) || defined(CONFIG_FIH_SW_DISPLAY_CABC))
+/* FIH-SW-MM-VH-DISPLAY-40* */
+#if defined(CONFIG_FIH_SW_DISPLAY_CABC)
     gmsm_fb_panel_data = (struct msm_fb_panel_data *)mfd->pdev->dev.platform_data;
 #endif
 #ifdef CONFIG_FIH_SW_DISPLAY_CABC
@@ -1419,8 +1461,8 @@ static int msm_fb_suspend_sub(struct msm_fb_data_type *mfd)
 static int msm_fb_resume_sub(struct msm_fb_data_type *mfd)
 {
 	int ret = 0;
-
-#ifdef CONFIG_FIH_SW_DISPLAY_MIPI_HEALTHY_CHECK
+/* FIH-SW-MM-VH-DISPLAY-40* */
+#ifdef CONFIG_FIH_SW_DISPLAY_CMI_LCM_HEALTHY_CHECK
 	int retry = 0;
 #endif
 
@@ -1443,8 +1485,8 @@ static int msm_fb_resume_sub(struct msm_fb_data_type *mfd)
 		ret =
 		     msm_fb_blank_sub(FB_BLANK_UNBLANK, mfd->fbi,
 				      mfd->op_enable);
-
-#ifdef CONFIG_FIH_SW_DISPLAY_MIPI_HEALTHY_CHECK
+/* FIH-SW-MM-VH-DISPLAY-40* */
+#ifdef CONFIG_FIH_SW_DISPLAY_CMI_LCM_HEALTHY_CHECK
 /* FIH-SW-MM-VH-DISPLAY-17* */
 		while((retry < 5) && (ret != 0)) {
 			printk(KERN_ERR "msm_fb_open: can't turn on display! retry = %d\n", retry);
@@ -1577,7 +1619,8 @@ static struct platform_driver msm_fb_driver = {
 		   },
 };
 
-#if defined(CONFIG_HAS_EARLYSUSPEND) && defined(CONFIG_FB_MSM_MDP303)
+/* FIH-SW2-MM-KW-set_to_black-00+{ */
+#if 0 //defined(CONFIG_HAS_EARLYSUSPEND) && defined(CONFIG_FB_MSM_MDP303)
 static void memset32_io(u32 __iomem *_ptr, u32 val, size_t count)
 {
 	count >>= 2;
@@ -1585,13 +1628,15 @@ static void memset32_io(u32 __iomem *_ptr, u32 val, size_t count)
 		writel(val, _ptr++);
 }
 #endif
+/* FIH-SW2-MM-KW-set_to_black-00-} */
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static void msmfb_early_suspend(struct early_suspend *h)
 {
 	struct msm_fb_data_type *mfd = container_of(h, struct msm_fb_data_type,
 						    early_suspend);
-#if defined(CONFIG_FB_MSM_MDP303)
+/* FIH-SW2-MM-KW-set_to_black-00+{ */
+#if 0 //defined(CONFIG_FB_MSM_MDP303)
 	/*
 	* For MDP with overlay, set framebuffer with black pixels
 	* to show black screen on HDMI.
@@ -1607,6 +1652,8 @@ static void msmfb_early_suspend(struct early_suspend *h)
 		break;
 	}
 #endif
+    memset(mfd->fbi->screen_base, 0x0, mfd->fbi->fix.smem_len);
+/* FIH-SW2-MM-KW-set_to_black-00-} */
 	msm_fb_suspend_sub(mfd);
 }
 
@@ -2500,7 +2547,8 @@ static int msm_fb_open(struct fb_info *info, int user)
 {
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
 	int result = 0;
-#ifdef CONFIG_FIH_SW_DISPLAY_MIPI_HEALTHY_CHECK
+/* FIH-SW-MM-VH-DISPLAY-40* */
+#ifdef CONFIG_FIH_SW_DISPLAY_CMI_LCM_HEALTHY_CHECK
 	int retry = 0;
 #endif
 
@@ -2518,7 +2566,8 @@ static int msm_fb_open(struct fb_info *info, int user)
 	if (!mfd->ref_cnt) {
 		mdp_set_dma_pan_info(info, NULL, TRUE);
 		result = msm_fb_blank_sub(FB_BLANK_UNBLANK, info, mfd->op_enable);
-#ifdef CONFIG_FIH_SW_DISPLAY_MIPI_HEALTHY_CHECK
+/* FIH-SW-MM-VH-DISPLAY-40* */
+#ifdef CONFIG_FIH_SW_DISPLAY_CMI_LCM_HEALTHY_CHECK
 /* FIH-SW-MM-VH-DISPLAY-17* */
 		while((retry < 5) && (result != 0)) {
 			printk(KERN_ERR "msm_fb_open: can't turn on display! retry = %d\n", retry);
@@ -2660,7 +2709,7 @@ static int msm_fb_pan_display(struct fb_var_screeninfo *var,
 	struct mdp_dirty_region *dirtyPtr = NULL;
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
 	
-#if (defined(CONFIG_FIH_SW_DISPLAY_BACKLIGHT_CMD_QUEUE) || defined(CONFIG_FIH_SW_DISPLAY_LCM_ID_CHECK))
+#if (defined(CONFIG_FIH_SW_DISPLAY_BACKLIGHT_CMD_QUEUE) || defined(CONFIG_FIH_SW_DISPLAY_LCM_ID_CHECK)|| defined(CONFIG_FIH_SW_DISPLAY_CMI_LCM_HEALTHY_CHECK)|| defined(CONFIG_FIH_SW_DISPLAY_AUO_LCM_HEALTHY_CHECK))
 	struct msm_fb_panel_data *pdata = NULL;
 #endif
 /* FIH-SW-MM-VH-DISPLAY-20*[ */
@@ -2779,10 +2828,12 @@ static int msm_fb_pan_display(struct fb_var_screeninfo *var,
 		up(&bkl_sem);
 #endif
 
-#ifdef CONFIG_FIH_SW_DISPLAY_LCM_ID_CHECK
-		if (mfd->bl_level > 0){   
-			if (msm_fb_check_panel_id(mfd, info) < 0) {
-				printk(KERN_ERR "[DISPLAY] %s, panel id is invalid, reset panel\n", __func__);
+/* FIH-SW-MM-VH-DISPLAY-40*[ */
+#if defined(CONFIG_FIH_SW_DISPLAY_LCM_ID_CHECK) || defined(CONFIG_FIH_SW_DISPLAY_AUO_LCM_HEALTHY_CHECK)
+		if (mfd->bl_level > 0){
+			if (msm_fb_check_lcm_healthy(mfd, info) < 0) {
+				printk(KERN_ERR "[DISPLAY] %s, panel crash detected at pan display, reset panel\n", __func__);
+/* FIH-SW-MM-VH-DISPLAY-40*] */
 				msm_fb_blank_sub(FB_BLANK_POWERDOWN, info, mfd->op_enable);
 #ifdef CONFIG_FIH_HR_MSLEEP
 				hr_msleep(5);

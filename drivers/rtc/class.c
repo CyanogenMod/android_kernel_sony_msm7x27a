@@ -142,7 +142,7 @@ static int rtc_resume(struct device *dev)
 	/* FIH-SW3-KERNEL-TH-add_last_alog-00+[ */
 #ifdef CONFIG_FIH_LAST_ALOG
 	alog_ram_console_sync_time(LOG_TYPE_ALL, SYNC_AFTER);
-#endif	
+#endif
 	/* FIH-SW3-KERNEL-TH-add_last_alog-00+] */
 
 	

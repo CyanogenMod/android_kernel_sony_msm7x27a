@@ -16,13 +16,7 @@
 #include <mach/fih_bq275x0_battery.h>
 #include "../../arch/arm/mach-msm/smd_private.h"
 #include "fih_bqfs.h"
-
-#if defined(CONFIG_FIH_POWER_LOG)
-#include "linux/pmlog.h"
-#endif
-
-#define CONFIG_FIH_POWER_LOG 1
-#define pmlog printk
+#include <mach/msm_smsm.h>
 
 #define ERASE_RETRIES           3
 #define FAILED_MARK             0xFFFFFFFF
@@ -45,6 +39,8 @@ extern void bq275x0_battery_exit_rommode(void);
 extern int bq275x0_battery_get_MfgInfo(char *buf);
 extern int bq275x0_query_fw_ver(void);
 extern int bq27520_isEnableBatteryCheck;
+extern void schedule_bq27520_hw_config(void);
+extern int bq275x0_battery_write_MfgInfo(char *buf, int len);
 
 enum {
     ERR_SUCCESSFUL,
@@ -81,16 +77,27 @@ static int bq275x0_RomMode_read(u8 cmd, u8 *data, int length)
         }
     };
 
-    ret |= i2c_transfer(bq275x0_client->adapter, &msgs[0], 1);
+    if (i2c_transfer(bq275x0_client->adapter, &msgs[0], 1) != 1) {
+        ret = -1;
+        dev_err(&bq275x0_client->dev,"I2C error at line %d\n", __LINE__);
+        goto exit;
+    }
     mdelay(1);
-    ret |= i2c_transfer(bq275x0_client->adapter, &msgs[1], 1);
+
+    if (i2c_transfer(bq275x0_client->adapter, &msgs[1], 1) != 1) {
+        ret = -1;
+        dev_err(&bq275x0_client->dev,"I2C error at line %d\n", __LINE__);
+        goto exit;
+    }
     mdelay(1);
+
+exit:
     return ret;
 }
 
 static int bq275x0_RomMode_write(u8 *cmd, int length)
 {
-    int ret;
+    int ret = 0;
     struct i2c_msg msgs[] = {
         [0] = {
             .addr   = bq275x0_client->addr,
@@ -100,8 +107,15 @@ static int bq275x0_RomMode_write(u8 *cmd, int length)
         },
     };
 
-    ret = (i2c_transfer(bq275x0_client->adapter, msgs, 1) < 0) ? -1 : 0;
+    if (i2c_transfer(bq275x0_client->adapter, msgs, 1) != 1) {
+        ret = -1;
+        dev_err(&bq275x0_client->dev,"I2C error at line %d\n", __LINE__);
+        goto exit;
+    }
+
     mdelay(1);
+
+exit:
     return ret;  
 }
 
@@ -163,12 +177,9 @@ static int bq275x0_RomMode_program_bqfs(void)
 
     while (idx < size) {
         counter++;
-        if (counter == 1 || counter % 200 == 0) {
-            dev_info(&bq275x0_client->dev,"[%d].\n", counter);
-#if defined(CONFIG_FIH_POWER_LOG)
-            pmlog("BQFS Line[%d]\n", counter);
-#endif
-        }
+        if (counter == 1 || counter % 200 == 0)
+            dev_info(&bq275x0_client->dev,"Line[%d].\n", counter);
+
         switch (BQFS[idx++]) {            
         case 'W':
             len = BQFS[idx++];
@@ -180,10 +191,7 @@ static int bq275x0_RomMode_program_bqfs(void)
                 cmd[0] = reg + (i * WRITE_BLOCK_SIZE);
                 memcpy(&cmd[1], &buf[i * WRITE_BLOCK_SIZE], WRITE_BLOCK_SIZE);
                 if (bq275x0_RomMode_write(cmd, WRITE_BLOCK_SIZE + 1)) {
-                    dev_err(&bq275x0_client->dev,"[%d] Write FAILED\n", counter);
-#if defined(CONFIG_FIH_POWER_LOG)
-                    pmlog("BQFS Line[%d] W Failed\n", counter);
-#endif
+                    dev_err(&bq275x0_client->dev,"Line[%d] Write FAILED %d, (A)\n", counter, i);
                     return -1;
                 }
             }
@@ -192,10 +200,7 @@ static int bq275x0_RomMode_program_bqfs(void)
                 cmd[0] = reg + (i * WRITE_BLOCK_SIZE);
                 memcpy(&cmd[1], &buf[i * WRITE_BLOCK_SIZE], (len - 1) % WRITE_BLOCK_SIZE);
                 if (bq275x0_RomMode_write(cmd, (len - 1) % WRITE_BLOCK_SIZE + 1)) {
-                    dev_err(&bq275x0_client->dev,"[%d] Write FAILED\n", counter);
-#if defined(CONFIG_FIH_POWER_LOG)
-                    pmlog("BQFS Line[%d] W Failed\n", counter);
-#endif
+                    dev_err(&bq275x0_client->dev,"Line[%d] Write FAILED %d, (B)\n", counter, i);
                     return -1;
                 }
             }
@@ -207,17 +212,18 @@ static int bq275x0_RomMode_program_bqfs(void)
         case 'C':
 //            mdelay(16);
             len = BQFS[idx++];
-            bq275x0_RomMode_read(BQFS[idx++], cmd, len - 1);
 
-            for (i = 0; i < (len - 1); i++) {
-                if (cmd[i] != BQFS[idx++]) {
-                    dev_err(&bq275x0_client->dev, "[%d] Checksum FAILED\n", counter);
-#if defined(CONFIG_FIH_POWER_LOG)
-                    pmlog("BQFS Line[%d] C Failed\n", counter);
-#endif 
+            cmd[0] = 0x3e; /* Give a init value other than 0 */
+            if (bq275x0_RomMode_read(BQFS[idx++], cmd, len - 1)) {
+                dev_err(&bq275x0_client->dev,"error read checksum back\n");
+                return -1;
+            }
+
+            for (i = 0; i < (len - 1); i++, idx ++)
+                if (cmd[i] != BQFS[idx]) {
+                    dev_err(&bq275x0_client->dev, "Line[%d] C Failed %02x %02x\n", counter, cmd[i], BQFS[idx]);
                     return -1;
                 }
-            }
             break;
 			
         case 'X':
@@ -228,10 +234,7 @@ static int bq275x0_RomMode_program_bqfs(void)
         }
     }
     
-    dev_info(&bq275x0_client->dev,"[%d].\n", counter);
-#if defined(CONFIG_FIH_POWER_LOG)
-    pmlog("BQFS Line[%d]\n", counter);
-#endif
+    dev_info(&bq275x0_client->dev,"Line[%d]\n", counter);
     
     return 0;
 }
@@ -261,7 +264,7 @@ static int bq275x0_RomMode_read_erase_if(void)
 static int bq275x0_RomMode_writing_image(void)
 {
     if (bq275x0_RomMode_program_bqfs()) {
-        dev_err(&bq275x0_client->dev, "BQFS programming was failed\n");
+        dev_err(&bq275x0_client->dev, "programming was failed\n");
         return -ERR_PROGRAM_DFI;
     }
 
@@ -312,14 +315,11 @@ static ssize_t bq275x0_RomMode_programming_store(struct device *dev,
     
         if ((g_error_type = bq275x0_RomMode_read_erase_if())) {
             bq275x0_battery_exit_rommode();
-#if defined(CONFIG_FIH_POWER_LOG)
-            pmlog("ERASE IF[FAILED]\n");
-#endif
+            dev_err(&bq275x0_client->dev, "ERASE IF[FAILED]\n");
             break;
         }
-#if defined(CONFIG_FIH_POWER_LOG)
-        pmlog("ERASE IF[SUCCESSFUL]\n");
-#endif
+        dev_info(&bq275x0_client->dev, "ERASE IF[SUCCESSFUL]\n");
+
     case PROGRAM_WRITING_DFI:   /* step 3 */
         if (step)
             step--;
@@ -330,14 +330,11 @@ static ssize_t bq275x0_RomMode_programming_store(struct device *dev,
 
         if ((g_error_type = bq275x0_RomMode_writing_image())) {
             bq275x0_battery_exit_rommode();
-#if defined(CONFIG_FIH_POWER_LOG)
-            pmlog("WRITING BQFS[FAILED]\n");
-#endif
+            dev_err(&bq275x0_client->dev, "WRITING BQFS[FAILED]\n");
             break;
         }
-#if defined(CONFIG_FIH_POWER_LOG)
-        pmlog("WRITING BQFS[SUCCESSFUL]\n");
-#endif
+        dev_info(&bq275x0_client->dev, "WRITING BQFS[SUCCESSFUL]\n");
+
     case PROGRAM_IT_ENABLE:     /* step 2 */
         if (step > 0) {
             if (step != 1)
@@ -351,14 +348,10 @@ static ssize_t bq275x0_RomMode_programming_store(struct device *dev,
             if (ret)
                 g_error_type = -ERR_IT_ENABLE;
             bq275x0_battery_exit_rommode();
-#if defined(CONFIG_FIH_POWER_LOG)
-            pmlog("IT ENABLE[FAILED]\n");
-#endif
+            dev_err(&bq275x0_client->dev, "IT ENABLE[FAILED]\n");
             break;
         }
-#if defined(CONFIG_FIH_POWER_LOG)
-        pmlog("IT ENABLE[SUCCESSFUL]\n");
-#endif
+        dev_info(&bq275x0_client->dev, "IT ENABLE[SUCCESSFUL]\n");
 
         counter = BQFS_TOTAL_LINES + 1;
     case PROGRAM_RESET:         /* step 1 */
@@ -373,16 +366,13 @@ static ssize_t bq275x0_RomMode_programming_store(struct device *dev,
             if (ret)
                 g_error_type = -ERR_RESET;
             bq275x0_battery_exit_rommode();
-#if defined(CONFIG_FIH_POWER_LOG)
-            pmlog("RESET[FAILED]\n");
-#endif
+
+            dev_err(&bq275x0_client->dev, "RESET[FAILED]\n");
             break;
         }
         
         bq275x0_battery_exit_rommode();
-#if defined(CONFIG_FIH_POWER_LOG)
-        pmlog("RESET[SUCCESSFUL]\n");
-#endif
+        dev_info(&bq275x0_client->dev, "RESET[SUCCESSFUL]\n");
 
         counter = BQFS_TOTAL_LINES + 2;
         break;
@@ -420,14 +410,24 @@ proc_calc_metrics(char *page, char **start, off_t off,
     return len;
 }
 
+/* Is Flashing on going? */
+static bool flashing = false;
+
 static void bq275x0_flash(void)
 {
-#if defined(CONFIG_FIH_POWER_LOG)
-    pmlog("[START]Flash BQFS.\n");
-#endif
 
+/* %%TODO: Flash LED but there has lots of problem need to be solved, so pending
+    I) LED driver init latter than gauge
+    II) LED file node is not ready before file system ready
+*/
+
+    dev_info(&bq275x0_client->dev, "[START]Flash BQFS.\n");
+
+    /* Mark flash is on going */
+    flashing = true;
     g_error_type = 0;
     counter = BQFS_TOTAL_LINES;
+
     schedule_delayed_work(&bqfs_upgrade, msecs_to_jiffies(30));
 }
 
@@ -454,32 +454,53 @@ bq275x0_dfi_upgrade_proc_write(struct file *file, const char __user *buffer,
 {
     dev_info(&bq275x0_client->dev, "procfile_write (/proc/dfi_upgrade) called\n");
     
-    if (copy_from_user(cmd, buffer, count)) {
+    if (copy_from_user(cmd, buffer, count))
         return -EFAULT;
-    } else {
-        if (!strncmp(cmd, "flash22685511@FIHLX\n", count)) {
-            bq275x0_flash();
-        }
+    else if (!strncmp(cmd, "flash22685511@FIHLX\n", count))
+        bq275x0_flash();
+    else if (!strncmp(cmd, "invalidmfg22685511@FIHLX\n", count)) {
+        unsigned char invalid_mfg_info[32];
+
+        invalid_mfg_info[0] = 0;
+        memcpy(&invalid_mfg_info[1], cmd, sizeof(invalid_mfg_info) - 1);
+        bq275x0_battery_write_MfgInfo(invalid_mfg_info, sizeof(invalid_mfg_info));
     }
-        
+
     return count;
+}
+
+#define NV_NEED_RESTORE 0x8686
+extern void kernel_restart(char *cmd);
+
+void reset_after_upgrade(void)
+{
+    int *pnvstatus = NULL;
+
+    pnvstatus = smem_alloc(SMEM_FIRST_BOOT_NVSYNC, sizeof(int));
+
+    /* Detect if we need to restore default NV, if not reset the device */
+    if (pnvstatus)
+        if (*pnvstatus != NV_NEED_RESTORE)
+            kernel_restart(NULL);
 }
 
 static void bq275x0_RomMode_upgrade(struct work_struct *work)
 {
-        bq275x0_RomMode_programming_store(NULL, NULL, "0 4", 4);
+    bq275x0_RomMode_programming_store(NULL, NULL, "0 4", 4);
+    dev_info(&bq275x0_client->dev, "[END]Flash BQFS %d.\n", g_error_type);
 
-#if defined(CONFIG_FIH_POWER_LOG)
-        pmlog("[END]Flash BQFS.\n");
-#endif
+    /* Upgrade done, reset the device */
+    if (g_error_type == 0)
+        reset_after_upgrade();
 }
+
+static char mfg_info[32];
 
 static int bq275x0_RomMode_probe(struct i2c_client *client,
                  const struct i2c_device_id *id)
 {
     int retval = 0;
-    char buf[32];
-    
+
     bq275x0_client = client;
     retval = device_create_file(&client->dev, &dev_attr_programming);
     if (retval) {
@@ -493,20 +514,19 @@ static int bq275x0_RomMode_probe(struct i2c_client *client,
     dfi_upgrade_proc_entry->read_proc   = bq275x0_dfi_upgrade_proc_read;
     dfi_upgrade_proc_entry->write_proc  = bq275x0_dfi_upgrade_proc_write;
 
-    if (bq275x0_battery_get_MfgInfo(&buf[0]) == 0) {
-        dev_info(&client->dev, "MFG INFO-FLASH: %d, \"%s\"\n", buf[0], buf);
-        dev_info(&client->dev, "MFG INFO-IMAGE: %d, \"%s\"\n",BQFS_MFG_INFO[0], BQFS_MFG_INFO);
+    if (bq275x0_battery_get_MfgInfo(&mfg_info[0]) == 0) {
+        dev_info(&client->dev, "MFG INFO-FLASH: %02X, \"%s\"\n", mfg_info[0], &mfg_info[1]);
+        dev_info(&client->dev, "MFG INFO-IMAGE: %02X, \"%s\"\n",BQFS_MFG_INFO[0], &BQFS_MFG_INFO[1]);
 
-        
-        if (strncmp(buf, BQFS_MFG_INFO, 32)) {
+        /* The most two significant bits is used to identify if gauge works good at first boot after flased */
+        if (memcmp(&mfg_info[1], &BQFS_MFG_INFO[1], 31) || ((mfg_info[0] & 0x3F) != BQFS_MFG_INFO[0]) ){
             dev_info(&client->dev, "DFI mismatch.\n");
-			#ifdef CONFIG_FIH_SW3_BQ275X0_ROMMODE_AUTO_UPGRADE
-				dev_info(&client->dev, "DFI mismatch, going on flashing.\n");
-				bq275x0_flash();
-			#endif
+            #ifdef CONFIG_FIH_SW3_BQ275X0_ROMMODE_AUTO_UPGRADE
+                dev_info(&client->dev, "DFI mismatch, going on flashing.\n");
+                bq275x0_flash();
+            #endif
         } else {
             dev_info(&client->dev, "DFI match.\n");
-
         }
         bq27520_isEnableBatteryCheck = 1;
         bq27520_fw_ver = bq275x0_query_fw_ver();
@@ -515,9 +535,56 @@ static int bq275x0_RomMode_probe(struct i2c_client *client,
         dev_err(&client->dev,"%s: Read MfgInfo from gauge failed, FORCE REFLASH\n", __func__);
         bq275x0_flash();
     }
+
+    /* Here to continue bq27520 init process.
+       Moved here to make sure the following works handled prior than hw init
+       1. Get manufacturer ID
+       2. Compare manufacturer ID, if different then flashing
+    */
+    schedule_bq27520_hw_config();
     
     return retval;
 }
+
+/*  [FUNCTION]
+                bq275x0_flash_recovery
+    [PURPOSE]
+                The function reflashes the image or marks first boot after flashed successfully
+    [IN]
+                reflash:
+                    If we need to reflash (because of checking gauge status fail)
+    [OUT]
+                NONE
+*/
+void bq275x0_flash_recovery(bool reflash)
+{
+    char buf[32];
+
+        dev_info(&bq275x0_client->dev, "%s %d %d\n", __func__, reflash, flashing);
+
+    /* If flah is ongoing, don't disturb it, just leave this function */
+    if (flashing) {
+        dev_info(&bq275x0_client->dev, "%s flashing ongoing\n", __func__);
+        goto exit;
+    }
+
+    /* Do the jobs only when this is the first boot after flashed
+       %%TBTA: If this is not the first boot and we found OCVCMDCOMP not set, what should we do?
+   */
+    if ((mfg_info[0] & 0x80) == 0x00) {
+        if (reflash) {
+            bq275x0_flash();
+	} else {
+            memcpy(buf, mfg_info, 32);
+            buf[0] |= 0x80;
+            bq275x0_battery_write_MfgInfo(buf, 32);
+        }
+    }
+
+exit:
+    return;
+}
+EXPORT_SYMBOL(bq275x0_flash_recovery);
 
 static int bq275x0_RomMode_remove(struct i2c_client *client)
 {

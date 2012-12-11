@@ -440,7 +440,6 @@ static int32_t mt9v115_set_fps(uint16_t fps)
             printk("mt9v115_set_fps: mt9v115_i2c_write_table(reg_fps_15_tbl) failed !\n");
             return rc;
         }
-        
     }else{ //fps =30 
         printk("mt9v115_set_fps: mt9v115_i2c_write_table (reg_fps_30_tbl) \n");
         mt9v115_i2c_write_table(&mt9v115_regs.reg_fps_30_tbl[0], mt9v115_regs.reg_fps_30_tbl_size); 
@@ -694,15 +693,6 @@ static int32_t mt9v115_set_sensor_mode(int mode,
         }   
         cam_msleep(5);// >0
 
-        //Div2-SW6-MM-MC-EnhanceStabilityForFrontCamera-00+{
-        if (pdev_mt9v115 != NULL)
-        {
-            msm_camio_disable(pdev_mt9v115);
-            cam_msleep(20);//Wait camio disable done.
-            printk("mt9v115_set_sensor_mode: msm_camio_disable() \n");
-        }
-        //Div2-SW6-MM-MC-EnhanceStabilityForFrontCamera-00+}
-
         //03. Power off.
         rc = mt9v115_power_off();
         if (rc < 0) {
@@ -726,15 +716,6 @@ static int32_t mt9v115_set_sensor_mode(int mode,
             printk("mt9v115_set_sensor_mode: INIT main reg table for reset failed !\n");
             return rc;
         }
-
-        //Div2-SW6-MM-MC-EnhanceStabilityForFrontCamera-00+{
-        if (pdev_mt9v115 != NULL)
-        {
-            msm_camio_enable(pdev_mt9v115);
-            cam_msleep(20);//Wait camio enable done.
-            printk("mt9v115_set_sensor_mode: msm_camio_enable() \n");
-        }
-        //Div2-SW6-MM-MC-EnhanceStabilityForFrontCamera-00+}
 
         //06. Stop streaming and config CSI .
         rc = mt9v115_i2c_write_table(&mt9v115_regs.reg_stop_tbl[0], mt9v115_regs.reg_stop_tbl_size);

@@ -283,6 +283,15 @@ int	get_interval( unsigned long old, unsigned long new )
 
 }
 
+#define	STATE_FLAG_MASK		0xff00
+#define	KEY_STATE_FLAG		0x5500
+
+#define	ISR_PRESS	0x1
+#define	ISR_RELEASE	0x2
+#define	ISR_DEBOUNCE	0x4
+#define	RPC_PRESS	0x8
+#define	RPC_RELEASE	0x10
+
 /*
  * tuple format: (key_code, key_param)
  *
@@ -296,17 +305,29 @@ int	get_interval( unsigned long old, unsigned long new )
  */
 static void report_hs_key(uint32_t key_code, uint32_t key_parm)
 {
-	int key, temp_key_code;
+	int key, temp_key_code, raw;
 
 	if (key_code == HS_REL_K)
+	{
+		raw = key_parm;
 		key = hs_find_key(key_parm);
+	}
 	else
+	{
+		raw = key_code;
 		key = hs_find_key(key_code);
+	}
 
 	temp_key_code = key_code;
 
 	if (key_parm == HS_REL_K)
 		key_code = key_parm;
+
+	if( ( raw & STATE_FLAG_MASK ) == KEY_STATE_FLAG )
+	{
+		printk( "PKEY : AMSS state(%x), [IP:IR:DE:RP:RR]=[%d:%d:%d:%d:%d]\n", raw, raw & ISR_PRESS ? 1 : 0, raw & ISR_RELEASE ? 1 : 0, raw & ISR_DEBOUNCE ? 1 : 0, raw & RPC_PRESS ? 1 : 0, raw & RPC_RELEASE ? 1 : 0 );
+		return;
+	}
 
 	switch (key) {
 	/* MM-RC-HEADSET-MULTIBUTTON-DETECT+[ */

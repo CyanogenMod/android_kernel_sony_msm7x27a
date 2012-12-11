@@ -287,6 +287,15 @@ if FIH_CONFIG_GROUP
                 Enable modem crash log if it active. 
         # FIH-SW1-KERNEL-HC-Modem_Crash_Log-00+]
 
+        # FIH-SW3-KERNEL-PK-INPUT_SAMPLING_DOWN_FACTOR-00+[
+        config FIH_INCREASE_CPU_FREQ_WHEN_INPUT_EVENT
+            bool "FIH INCREASE CPU FREQ WHEN INPUT EVENT"
+            depends on FIH_CONFIG_GROUP
+            default n
+            help
+                Enable this feauture to adjust cpufreq settings.
+        # FIH-SW3-KERNEL-PK-INPUT_SAMPLING_DOWN_FACTOR-00+]
+
         # MTD-Conn-JC-BTSleep-00+[
         config BROADCOM_BCM4330_BTFM
             tristate "Broadcom BCM4330 is used"
@@ -346,9 +355,10 @@ if FIH_CONFIG_GROUP
             default n
             help
                 Enable CABC toolbox
-        config FIH_SW_DISPLAY_MIPI_HEALTHY_CHECK
+#FIH-SW-MM-VH-DISPLAY-40*[
+        config FIH_SW_DISPLAY_CMI_LCM_HEALTHY_CHECK
             depends on FIH_SW_DISPLAY && FIH_PROJECT_MES
-            bool "Enable MIPI healthy check"
+            bool "Enable CMI LCM healthy check"
             default n
             help
                 Enable MIPI healthy check, retry initial sequence once panel crashed.
@@ -358,6 +368,13 @@ if FIH_CONFIG_GROUP
             default n
             help
                 Enable LCM id check.
+        config FIH_SW_DISPLAY_AUO_LCM_HEALTHY_CHECK
+            depends on FIH_SW_DISPLAY && FIH_PROJECT_MES
+            bool "Enable AUO LCM healthy check"
+            default n
+            help
+                Enable AUO LCM healthy check.
+#FIH-SW-MM-VH-DISPLAY-40*]
         config FIH_SW_FWVGA_LOGO
             depends on FIH_SW_DISPLAY && FIH_PROJECT_JLO
             bool "Sony FWVGA Logo"
@@ -682,6 +699,15 @@ if FIH_CONFIG_GROUP
                 Enable modem crash log if it active. 
         # FIH-SW1-KERNEL-HC-Modem_Crash_Log-00+]
 
+        # FIH-SW3-KERNEL-PK-INPUT_SAMPLING_DOWN_FACTOR-00+[
+        config FIH_INCREASE_CPU_FREQ_WHEN_INPUT_EVENT
+            bool "FIH INCREASE CPU FREQ WHEN INPUT EVENT"
+            depends on FIH_CONFIG_GROUP
+            default n
+            help
+                Enable this feauture to adjust cpufreq settings.
+        # FIH-SW3-KERNEL-PK-INPUT_SAMPLING_DOWN_FACTOR-00+]
+
         # MTD-Conn-JC-BTSleep-00+[
         config BROADCOM_BCM4330_BTFM
             tristate "Broadcom BCM4330 is used"
@@ -741,20 +767,26 @@ if FIH_CONFIG_GROUP
             default n
             help
                 Enable CABC toolbox
-        config FIH_SW_DISPLAY_MIPI_HEALTHY_CHECK
+#FIH-SW-MM-VH-DISPLAY-40*[
+        config FIH_SW_DISPLAY_CMI_LCM_HEALTHY_CHECK
             depends on FIH_SW_DISPLAY && FIH_PROJECT_MES
-            bool "Enable MIPI healthy check"
+            bool "Enable CMI LCM healthy check"
             default n
             help
                 Enable MIPI healthy check, retry initial sequence once panel crashed.
-#FIH-SW-MM-VH-DISPLAY-38*[
         config FIH_SW_DISPLAY_LCM_ID_CHECK
-            depends on FIH_SW_DISPLAY
+            depends on FIH_SW_DISPLAY && FIH_PROJECT_TAP
             bool "Enable LCM id check"
             default n
             help
                 Enable LCM id check.
-#FIH-SW-MM-VH-DISPLAY-38*]
+        config FIH_SW_DISPLAY_AUO_LCM_HEALTHY_CHECK
+            depends on FIH_SW_DISPLAY && FIH_PROJECT_MES
+            bool "Enable AUO LCM healthy check"
+            default n
+            help
+                Enable AUO LCM healthy check.
+#FIH-SW-MM-VH-DISPLAY-40*]
         config FIH_SW_FWVGA_LOGO
             depends on FIH_SW_DISPLAY && FIH_PROJECT_JLO
             bool "Sony FWVGA Logo"
@@ -1068,6 +1100,15 @@ if FIH_CONFIG_GROUP
                 Enable modem crash log if it active. 
         # FIH-SW1-KERNEL-HC-Modem_Crash_Log-00+]
 
+        # FIH-SW3-KERNEL-PK-INPUT_SAMPLING_DOWN_FACTOR-00+[
+        config FIH_INCREASE_CPU_FREQ_WHEN_INPUT_EVENT
+            bool "FIH INCREASE CPU FREQ WHEN INPUT EVENT"
+            depends on FIH_CONFIG_GROUP
+            default n
+            help
+                Enable this feauture to adjust cpufreq settings.
+        # FIH-SW3-KERNEL-PK-INPUT_SAMPLING_DOWN_FACTOR-00+]
+
         # MTD-Conn-JC-BTSleep-00+[
         config BROADCOM_BCM4330_BTFM
             tristate "Broadcom BCM4330 is used"
@@ -1127,9 +1168,10 @@ if FIH_CONFIG_GROUP
             default n
             help
                 Enable CABC toolbox
-        config FIH_SW_DISPLAY_MIPI_HEALTHY_CHECK
+#FIH-SW-MM-VH-DISPLAY-40*[
+        config FIH_SW_DISPLAY_CMI_LCM_HEALTHY_CHECK
             depends on FIH_SW_DISPLAY && FIH_PROJECT_MES
-            bool "Enable MIPI healthy check"
+            bool "Enable CMI LCM healthy check"
             default n
             help
                 Enable MIPI healthy check, retry initial sequence once panel crashed.
@@ -1139,6 +1181,13 @@ if FIH_CONFIG_GROUP
             default n
             help
                 Enable LCM id check.
+        config FIH_SW_DISPLAY_AUO_LCM_HEALTHY_CHECK
+            depends on FIH_SW_DISPLAY && FIH_PROJECT_MES
+            bool "Enable AUO LCM healthy check"
+            default n
+            help
+                Enable AUO LCM healthy check.
+#FIH-SW-MM-VH-DISPLAY-40*]
         config FIH_SW_FWVGA_LOGO
             depends on FIH_SW_DISPLAY && FIH_PROJECT_JLO
             bool "Sony FWVGA Logo"

@@ -18,6 +18,8 @@
 #include "mipi_ilitek.h"
 #include <mach/vreg.h>
 #include <linux/gpio.h>
+/* FIH-SW-MM-VH-DISPLAY-47+ */
+#include <mach/fih_lcm.h>
 
 static struct msm_panel_common_pdata *mipi_ilitek_pdata;
 
@@ -172,8 +174,10 @@ static struct dsi_cmd_desc ilitek_video_on_cmds[] = {
 /* FIH-SW-MM-VH-DISPLAY-24*] */
 /* FIH-SW-MM-VH-DISPLAY-20*[ */
 static struct dsi_cmd_desc ilitek_video_off_cmds[] = {
-	{DTYPE_DCS_WRITE1, 1, 0, 0, 0,
+/* FIH-SW-MM-VH-DISPLAY-49*[ */
+	{DTYPE_DCS_WRITE1, 1, 0, 0, 15,
 		sizeof(write_ctrl_displayDD0), write_ctrl_displayDD0},
+/* FIH-SW-MM-VH-DISPLAY-49*] */
 	{DTYPE_DCS_WRITE, 1, 0, 0, 10,
 		sizeof(display_off), display_off}
 };
@@ -243,6 +247,10 @@ static int mipi_ilitek_lcd_on(struct platform_device *pdev)
 	printk(KERN_ALERT "[DISPLAY] Finish sending dsi commands\n, rc=%d\r\n", rc);
 
 	display_initialize = 1;
+
+/* FIH-SW-MM-VH-DISPLAY-47+[ */
+	mfd->panel_info.lcm_model = LCM_ID_DA_TAP_CMI;
+/* FIH-SW-MM-VH-DISPLAY-47+] */
 
 	if(rc >0)
 		rc = 0;

@@ -1687,6 +1687,7 @@ msmsdcc_irq(int irq, void *dev_id)
 #endif
 
 		if (status & MCI_SDIOINTROPE) {
+	        WARN(1, "call mmc_signal_sdio_irq will make panic because sdio_irq_thread == NULL\n");  //FIH-CONN-EC-WiFiRuntimeSuspend-03+
 			if (host->sdcc_suspending)
 				wake_lock(&host->sdio_suspend_wlock);
 			mmc_signal_sdio_irq(host->mmc);
@@ -2981,6 +2982,7 @@ static void msmsdcc_enable_sdio_irq(struct mmc_host *mmc, int enable)
 	if (enable) {
 		spin_lock_irqsave(&host->lock, flags);
 		host->mci_irqenable |= MCI_SDIOINTOPERMASK;
+	    pr_info("%s: %s: enable sdio irq clks_on(%d)\n", mmc_hostname(mmc), __func__, host->clks_on);  //FIH-CONN-EC-WiFiRuntimeSuspend-03+
 		if (host->clks_on) {
 			writel_relaxed(readl_relaxed(host->base + MMCIMASK0) |
 				MCI_SDIOINTOPERMASK, host->base + MMCIMASK0);
@@ -2989,6 +2991,7 @@ static void msmsdcc_enable_sdio_irq(struct mmc_host *mmc, int enable)
 		spin_unlock_irqrestore(&host->lock, flags);
 	} else {
 		host->mci_irqenable &= ~MCI_SDIOINTOPERMASK;
+	    pr_info("%s: %s: disable sdio irq clks_on(%d)\n", mmc_hostname(mmc), __func__, host->clks_on);  //FIH-CONN-EC-WiFiRuntimeSuspend-03+
 		if (host->clks_on) {
 			writel_relaxed(readl_relaxed(host->base + MMCIMASK0) &
 				~MCI_SDIOINTOPERMASK, host->base + MMCIMASK0);
@@ -5102,6 +5105,9 @@ static int msmsdcc_remove(struct platform_device *pdev)
 	if (pm_runtime_suspended(&(pdev)->dev))
 		pm_runtime_resume(&(pdev)->dev);
 
+	pr_info("%s: %s: start\n", mmc_hostname(mmc), __func__);
+    if (pdev->id == WLAN_ID)
+        WARN(1, "mmc2 msmsdcc_remove");
 	host = mmc_priv(mmc);
 
 	DBG(host, "Removing SDCC device = %d\n", pdev->id);
@@ -5256,48 +5262,51 @@ msmsdcc_runtime_suspend(struct device *dev)
 	}
 
 	pr_debug("%s: %s: start\n", mmc_hostname(mmc), __func__);
+	pr_info("%s: %s: start\n", mmc_hostname(mmc), __func__);
 	if (mmc) {
 		host->sdcc_suspending = 1;
 		mmc->suspend_task = current;
 
-        /* FIH-CONN-EC-WiFiRuntimeSuspend-01+[ */
-        if (mmc->card && (mmc->card->type == MMC_TYPE_SDIO)) {
-            spin_lock_irqsave(&host->lock, flags);
-            if(host->clks_on) {
-                pr_err("%s: %s: SDIO card, disable clock, ref. count clk(%d), pclk(%d)\n", mmc_hostname(mmc), __func__, host->clk->count, host->pclk->count);
-                msmsdcc_setup_clocks(host, false);
-                host->clks_on = 0;
-            }
-            spin_unlock_irqrestore(&host->lock, flags);
-        }
+
+        /*
+         * MMC core thinks that host is disabled by now since
+         * runtime suspend is scheduled after msmsdcc_disable()
+         * is called. Thus, MMC core will try to enable the host
+         * while suspending it. This results in a synchronous
+         * runtime resume request while in runtime suspending
+         * context and hence inorder to complete this resume
+         * requet, it will wait for suspend to be complete,
+         * but runtime suspend also can not proceed further
+         * until the host is resumed. Thus, it leads to a hang.
+         * Hence, increase the pm usage count before suspending
+         * the host so that any resume requests after this will
+         * simple become pm usage counter increment operations.
+         */
+        pm_runtime_get_noresume(dev);
+        /* If there is pending detect work abort runtime suspend */
+        if (unlikely(work_busy(&mmc->detect.work)))
+            rc = -EAGAIN;
+/* FIH-CONN-EC-WiFiRuntimeSuspend-03*[ */
         else {
-        /* FIH-CONN-EC-WiFiRuntimeSuspend-01+] */
-
-            /*
-             * MMC core thinks that host is disabled by now since
-             * runtime suspend is scheduled after msmsdcc_disable()
-             * is called. Thus, MMC core will try to enable the host
-             * while suspending it. This results in a synchronous
-             * runtime resume request while in runtime suspending
-             * context and hence inorder to complete this resume
-             * requet, it will wait for suspend to be complete,
-             * but runtime suspend also can not proceed further
-             * until the host is resumed. Thus, it leads to a hang.
-             * Hence, increase the pm usage count before suspending
-             * the host so that any resume requests after this will
-             * simple become pm usage counter increment operations.
-             */
-            pm_runtime_get_noresume(dev);
-            /* If there is pending detect work abort runtime suspend */
-            if (unlikely(work_busy(&mmc->detect.work)))
-                rc = -EAGAIN;
-            else
+            if (mmc->card && mmc_card_sdio(mmc->card)) {
+                spin_lock_irqsave(&host->lock, flags);
+                if(host->clks_on) {
+                    pr_info("%s: %s: SDIO card, disable clock, ref. count clk(%d), pclk(%d)\n", mmc_hostname(mmc), __func__, host->clk->count, host->pclk->count);
+                    msmsdcc_setup_clocks(host, false);
+                    host->clks_on = 0;
+                    host->sdcc_suspended = true;
+                }
+                spin_unlock_irqrestore(&host->lock, flags);
+            } else {
                 rc = mmc_suspend_host(mmc);
-            pm_runtime_put_noidle(dev);
-
-        }  /* FIH-CONN-EC-WiFiRuntimeSuspend-01+ */
+            }
+        }
+//            rc = mmc_suspend_host(mmc);
+/* FIH-CONN-EC-WiFiRuntimeSuspend-03*] */
+        pm_runtime_put_noidle(dev);
 
 		if (!rc) {
+	        pr_info("%s: %s: before host->lock\n", mmc_hostname(mmc), __func__);
 			spin_lock_irqsave(&host->lock, flags);
 			host->sdcc_suspended = true;
 			spin_unlock_irqrestore(&host->lock, flags);
@@ -5309,6 +5318,7 @@ msmsdcc_runtime_suspend(struct device *dev)
 				 * clocks to allow deep sleep (TCXO shutdown).
 				 */
 				mmc_host_clk_hold(mmc);
+	            pr_info("%s: %s: before mmc->clk_lock\n", mmc_hostname(mmc), __func__);
 				spin_lock_irqsave(&mmc->clk_lock, flags);
 				mmc->clk_old = mmc->ios.clock;
 				mmc->ios.clock = 0;
@@ -5324,6 +5334,7 @@ msmsdcc_runtime_suspend(struct device *dev)
 			wake_unlock(&host->sdio_suspend_wlock);
 	}
 	pr_debug("%s: %s: ends with err=%d\n", mmc_hostname(mmc), __func__, rc);
+	pr_info("%s: %s: ends with err=%d\n", mmc_hostname(mmc), __func__, rc);
 out:
 	/* set bus bandwidth to 0 immediately */
 	msmsdcc_msm_bus_cancel_work_and_set_vote(host, NULL);
@@ -5355,10 +5366,10 @@ msmsdcc_runtime_resume(struct device *dev)
 		}
 
 /* FIH-CONN-EC-WiFiRuntimeSuspend-01+[ */
-        if(mmc->card && (mmc->card->type == MMC_TYPE_SDIO)) {
+        if(mmc->card && mmc_card_sdio(mmc->card)) {
             spin_lock_irqsave(&host->lock, flags);
             if(!host->clks_on) {
-                pr_err("%s: %s: SDIO card, enable clock, ref. count clk(%d), pclk(%d)\n", mmc_hostname(mmc), __func__, host->clk->count, host->pclk->count);
+                pr_info("%s: %s: SDIO card, enable clock, ref. count clk(%d), pclk(%d)\n", mmc_hostname(mmc), __func__, host->clk->count, host->pclk->count);
                 msmsdcc_setup_clocks(host, true);
                 host->clks_on = 1;
             }
@@ -5421,6 +5432,7 @@ static int msmsdcc_pm_suspend(struct device *dev)
 
     if (mmc)
     {
+	    pr_info("%s: %s: start\n", mmc_hostname(mmc), __func__);
         if (host->pdev_id != WLAN_ID) {
             if (host->plat->status_irq)
                 disable_irq(host->plat->status_irq);

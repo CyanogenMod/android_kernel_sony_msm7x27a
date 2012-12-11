@@ -165,11 +165,14 @@ static void write_crash_notes(int real)
 
 #endif
 
-	/* Make sure we have crash_notes in ram before reset */
-	flush_cache_all();
-#ifdef CONFIG_CACHE_L2X0
-	l2x0_suspend();
-#endif
+	if (real) {
+		/* Make sure we have crash_notes in ram before reset */
+		flush_cache_all();
+		#ifdef CONFIG_CACHE_L2X0
+		l2x0_suspend();
+		#endif
+	}
+
 }
 
 static int update_crash_notes(struct notifier_block *this,

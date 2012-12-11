@@ -1747,8 +1747,11 @@ void mmc_rescan(struct work_struct *work)
 		container_of(work, struct mmc_host, detect.work);
 	bool extend_wakelock = false;
 
-	if (host->rescan_disable)
+    printk(KERN_INFO "%s:%s rescan\n", __func__, mmc_hostname(host));
+	if (host->rescan_disable) {
+        printk("%s %d [THSU]:: rescan disabled rutern directly\n", __func__, __LINE__);
 		return;
+    }
 
 	mmc_bus_get(host);
 
@@ -1757,8 +1760,10 @@ void mmc_rescan(struct work_struct *work)
 	 * still present
 	 */
 	if (host->bus_ops && host->bus_ops->detect && !host->bus_dead
-	    && !(host->caps & MMC_CAP_NONREMOVABLE))
+	    && !(host->caps & MMC_CAP_NONREMOVABLE)) {
+        printk("%s %d [THSU]:: bus_ops detect\n", __func__, __LINE__);
 		host->bus_ops->detect(host);
+    }
 
 	/* If the card was removed the bus will be marked
 	 * as dead - extend the wakelock so userspace
@@ -1777,6 +1782,7 @@ void mmc_rescan(struct work_struct *work)
 
 	/* if there still is a card present, stop here */
 	if (host->bus_ops != NULL) {
+        printk("%s %d [THSU]:: bus_ops != NULL\n", __func__, __LINE__);
 		mmc_bus_put(host);
 		goto out;
 	}
@@ -1787,8 +1793,10 @@ void mmc_rescan(struct work_struct *work)
 	 */
 	mmc_bus_put(host);
 
-	if (host->ops->get_cd && host->ops->get_cd(host) == 0)
+	if (host->ops->get_cd && host->ops->get_cd(host) == 0) {
+        printk("%s %d [THSU]:: ops->get_cd\n", __func__, __LINE__);
 		goto out;
+    }
 
 	mmc_claim_host(host);
 	if (!mmc_rescan_try_freq(host, host->f_min))
@@ -1801,6 +1809,7 @@ void mmc_rescan(struct work_struct *work)
 	else
 		wake_unlock(&host->detect_wake_lock);
 	if (host->caps & MMC_CAP_NEEDS_POLL) {
+        printk("%s %d [THSU]:: mmc_schedule_delayed_work\n", __func__, __LINE__);
 		wake_lock(&host->detect_wake_lock);
 		mmc_schedule_delayed_work(&host->detect, HZ);
 	}

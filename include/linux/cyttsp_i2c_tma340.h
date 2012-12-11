@@ -67,6 +67,7 @@ enum cyttsp_gen {
 #define reset_cmd
 /*FIH-MTD-PERIPHERAL-CH-Add_command-00++]*/
 /*#define FIH_VIRTUAL_BUTTON*/ /*FIH-MTD-PERIPHERAL-CH-KEY_AREA-00++*/
+#define CYTTSP_CM_bit /*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++*/
 
 /*FIH-MTD-PERIPHERAL-CH-MES-02++[*/
 #ifdef CONFIG_FIH_MACH_TAMSUI_MES

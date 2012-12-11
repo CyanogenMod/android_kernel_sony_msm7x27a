@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2003-2008 Alan Stern
  * Copyeight (C) 2009 Samsung Electronics
- * Copyright (C) 2011-2012 Foxconn International Holdings, Ltd. All rights reserved.
+ * Copyright(C) 2011-2012 Foxconn International Holdings, Ltd. All rights reserved.
  * Author: Michal Nazarewicz (m.nazarewicz@samsung.com)
  *
  * This program is free software; you can redistribute it and/or modify
@@ -228,6 +228,7 @@ struct interrupt_data {
 #define ASC(x)		((u8) ((x) >> 8))
 #define ASCQ(x)		((u8) (x))
 
+#define RANDOM_WRITE_COUNT_TO_BE_FLUSHED (5)    /* MTD-Connectivity-FY-USB_WHQL_workaround */
 
 /*-------------------------------------------------------------------------*/
 
@@ -236,6 +237,9 @@ struct fsg_lun {
 	struct file	*filp;
 	loff_t		file_length;
 	loff_t		num_sectors;
+
+    u8		random_write_count;    /* MTD-Connectivity-FY-USB_WHQL_workaround */
+    loff_t		last_offset;       /* MTD-Connectivity-FY-USB_WHQL_workaround */
 
 	unsigned int	initially_ro:1;
 	unsigned int	ro:1;
@@ -652,6 +656,8 @@ static void fsg_lun_close(struct fsg_lun *curlun)
 		LDBG(curlun, "close backing file\n");
 		fput(curlun->filp);
 		curlun->filp = NULL;
+		curlun->last_offset = 0;        /* MTD-Connectivity-FY-USB_WHQL_workaround++ */
+		curlun->random_write_count = 0; /* MTD-Connectivity-FY-USB_WHQL_workaround++ */
 		printk(KERN_INFO "%s(): closed backing file\n", __func__);
 	}
 }
@@ -666,10 +672,19 @@ static void fsg_lun_close(struct fsg_lun *curlun)
 static int fsg_lun_fsync_sub(struct fsg_lun *curlun)
 {
 	struct file	*filp = curlun->filp;
+	int rc = 0;  /* MTD-Connectivity-FY-USB_WHQL_workaround */
 
 	if (curlun->ro || !filp)
 		return 0;
-	return vfs_fsync(filp, 1);
+    /* MTD-Connectivity-FY-USB_WHQL_workaround++ */
+	rc = vfs_fsync(filp, 1);
+    if (!rc) {
+		curlun->last_offset = 0;
+		curlun->random_write_count = 0;
+	}
+	/* MTD-Connectivity-FY-USB_WHQL_workaround-- */
+
+	return rc;
 }
 
 static void store_cdrom_address(u8 *dest, int msf, u32 addr)

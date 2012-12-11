@@ -572,7 +572,8 @@ static ssize_t show_bios_limit(struct cpufreq_policy *policy, char *buf)
 	return sprintf(buf, "%u\n", policy->cpuinfo.max_freq);
 }
 
-cpufreq_freq_attr_ro_perm(cpuinfo_cur_freq, 0400);
+/*cpufreq_freq_attr_ro_perm(cpuinfo_cur_freq, 0400);*//*KERNEL-SC-get-cpu-frequency-01-*/
+cpufreq_freq_attr_ro(cpuinfo_cur_freq);/*change the authority of cpuinfo_cur_freq file node to 0444.*//*KERNEL-SC-get-cpu-frequency-01+*/
 cpufreq_freq_attr_ro(cpuinfo_min_freq);
 cpufreq_freq_attr_ro(cpuinfo_max_freq);
 cpufreq_freq_attr_ro(cpuinfo_transition_latency);

@@ -770,7 +770,8 @@ struct msm_snapshot_pp_status {
 #define CFG_SET_AE_METER	36 /* FIH-SW3-MM-SL-Add WB-00+ */
 #define CFG_SET_SCENE		37 /* FIH-SW3-MM-SL-Add WB-00+ */
 #define CFG_SET_TOUCH_FOCUS 38//FIH-SW-MM-MC-ImplementTouchFocusAndCAF-00+
-#define CFG_MAX			39//FIH-SW-MM-MC-ImplementTouchFocusAndCAF-00*
+#define CFG_GET_FLASH_STATE	39 /*MTD-MM-SL-ModifyPicDetailInfo-01+*/
+#define CFG_MAX			40//FIH-SW-MM-MC-ImplementTouchFocusAndCAF-00* /*MTD-MM-SL-ModifyPicDetailInfo-01**/
 
 #define MOVE_NEAR	0
 #define MOVE_FAR	1
@@ -1133,6 +1134,7 @@ struct sensor_cfg_data {
 		uint32_t pict_max_exp_lc;
 		uint16_t p_fps;
 		uint16_t v_fps; /* FIH-SW3-MM-SL-Set FPS-00+ */
+		int8_t flash_state;/*MTD-MM-SL-ModifyPicDetailInfo-01+*/
 		struct sensor_init_cfg init_info;
 		struct sensor_pict_fps gfps;
 		struct exp_gain_cfg exp_gain;

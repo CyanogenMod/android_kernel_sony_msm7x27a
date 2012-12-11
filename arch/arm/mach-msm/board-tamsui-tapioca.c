@@ -1500,7 +1500,7 @@ static struct cyttsp_platform_data cypress_i2c_ttsp_platform_data = {
 	.use_st = 0, /*support single-touch FIH-SW3-PERIPHERAL-CH-TouchDriver_Porting_2010-02+*/
 	.use_mt = 1, /*support multi-touch FIH-SW3-PERIPHERAL-CH-TouchDriver_Porting_2010-02+*/
 	.use_trk_id = 1, /*FIH-MTD-PERIPHERAL-CH-TRACKING_ID-00++*/
-	.use_hndshk = 1, /*FIH-MTD-PERIPHERAL-CH-2016-00*/
+	.use_hndshk = 0, /*FIH-MTD-PERIPHERAL-CH-Handshake-00++*/
 	.use_timer = 0, /*use polling*/
 	.use_sleep = 1, /*deep sleep mode for early suspend/late resume*/
 	.use_gestures = 0, /*use gestures function*/
@@ -1666,7 +1666,7 @@ static struct msm_i2c_platform_data msm_gsbi1_qup_i2c_pdata = {
 #define MSM_PMEM_MDP_SIZE       0x1500000/*MTD-SW-MM-CL-PMEMusage-00* //0x2300000 */
 #define MSM7x25A_MSM_PMEM_MDP_SIZE       0x1500000
 
-#define MSM_PMEM_ADSP_SIZE      0xD00000//0x1100000  /*MTD-SW-MM-SL-CustmizeAdspSize-02 */
+#define MSM_PMEM_ADSP_SIZE      0x1500000//0x1100000  /*MTD-SW-MM-SL-CustmizeAdspSize-03 */
 #define MSM7x25A_MSM_PMEM_ADSP_SIZE      0xB91000
 
 
@@ -1871,15 +1871,15 @@ static struct msm_gpio sdc1_cfg_data[] = {
 };
 
 static struct msm_gpio sdc1_sleep_cfg_data[] = {
-	{GPIO_CFG(51, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),
+	{GPIO_CFG(51, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA),
 								"sdc1_dat_3"},
-	{GPIO_CFG(52, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),
+	{GPIO_CFG(52, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA),
 								"sdc1_dat_2"},
-	{GPIO_CFG(53, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),
+	{GPIO_CFG(53, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA),
 								"sdc1_dat_1"},
-	{GPIO_CFG(54, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),
+	{GPIO_CFG(54, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA),
 								"sdc1_dat_0"},
-	{GPIO_CFG(55, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),
+	{GPIO_CFG(55, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA),
 								"sdc1_cmd"},
 	{GPIO_CFG(56, 0, GPIO_CFG_INPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA),
 								"sdc1_clk"},
@@ -2108,7 +2108,12 @@ static uint32_t msm_sdcc_setup_power(struct device *dv, unsigned int vdd)
 	if (rc)
 		goto out;
 
-	rc = msm_sdcc_setup_vreg(pdev->id, !!vdd);
+//CONN-EC-Regulator-01*[
+    if (pdev->id == WLAN_SLOT) {
+    } else {
+	    rc = msm_sdcc_setup_vreg(pdev->id, !!vdd);
+    }
+//CONN-EC-Regulator-01*]
 out:
 	return rc;
 }
@@ -2254,8 +2259,10 @@ static void __init msm7x27a_init_mmc(void)
 #endif
 	/* SDIO WLAN slot */
 #ifdef CONFIG_MMC_MSM_SDC2_SUPPORT
-	if (mmc_regulator_init(2, "mmc", 2850000))
-		return;
+//CONN-EC-Regulator-01-[
+//	if (mmc_regulator_init(2, "mmc", 2850000))
+//		return;
+//CONN-EC-Regulator-01-]
 	msm_add_sdcc(2, &sdc2_plat_data);
 #endif
 	/* Not Used */

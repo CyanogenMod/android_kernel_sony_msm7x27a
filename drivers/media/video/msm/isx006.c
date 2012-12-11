@@ -56,6 +56,9 @@
 /* FIH-SW3-MM-UW-performance tuning-00+*/
 #define ISX006_OM_RETRY_COUNT 100
 #define ISX006_CM_RETRY_COUNT 150
+/* FIH-SW3-MM-UW-flash tuning-04+*/
+#define ISX006_AE_RETRY_COUNT 30
+/* FIH-SW3-MM-UW-flash tuning-04-*/
 #define ISX006_AF_RETRY_COUNT 250
 /* FIH-SW3-MM-UW-performance tuning-00+*/
 /*MM-UW-support AF---*/
@@ -90,17 +93,34 @@ static uint16_t C_NR = 0xFFFF;
 static uint16_t C_NB = 0xFFFF; 
 static uint16_t C_PR = 0xFFFF; 
 static uint16_t C_PB = 0xFFFF; 
-/* FIH-SW3-MM-UW-flash tuning-00+*/
-uint16_t AESCL_AUTO = 0xFFFF; //0x0288
-uint16_t ERRSCL_AUTO = 0xFFFF; //0x0284
-uint16_t AESCL_NOW = 0xFFFF; //0x028A
-uint16_t ERRSCL_NOW = 0xFFFF; //0x0286
-/* FIH-SW3-MM-UW-flash tuning-00-*/
+static uint16_t NORMR = 0xFFFF;
+static uint16_t NORMB = 0xFFFF;
+static uint16_t AWB_PRER = 0xFFFF;
+static uint16_t AWB_PREB = 0xFFFF;
+static uint16_t Shading_index = 0xFFFF;
+
+static uint8_t vendor_id = 0x00;
+/* FIH-SW3-MM-UW-flash tuning-04+*/
+uint32_t AESCL_AUTO = 0xFFFF; //0x0288
+uint32_t ERRSCL_AUTO = 0xFFFF; //0x0284
+uint32_t AESCL_NOW = 0xFFFF; //0x028A
+uint32_t ERRSCL_NOW = 0xFFFF; //0x0286
+/* FIH-SW3-MM-UW-flash tuning-04-*/
 /*MM-UW-fix high AF power-00+*/
 static uint16_t current_af_mode = 0;
 /*MM-UW-fix high AF power-00-*/
 static bool torch_enable = false;
 static bool flash_enable = false;
+/* FIH-SW3-MM-UW-modify far AF-00+*/
+/* FIH-SW3-MM-UW-modify touch AF-00+*/
+/* FIH-SW3-MM-UW-fast AF-01+*/
+static int8_t AF_type = 0;
+static bool AF_skip = false;
+static bool f_CAF = false;
+/* FIH-SW3-MM-UW-fast AF-01-*/
+/* FIH-SW3-MM-UW-modify touch AF-00-*/
+/* FIH-SW3-MM-UW-modify far AF-00-*/
+static int8_t is_flash_enable = 0; /*MTD-MM-SL-ModifyPicDetailInfo-01+*/
 
 static uint16_t slave_add;
 /* FIH-SW3-MM-UW-set AF range-00+*/
@@ -153,7 +173,7 @@ struct isx006_ctrl_t {
 static bool CSI_CONFIG = false;
 static bool STARTUP = false;
 static struct isx006_ctrl_t *isx006_ctrl;
-static bool LowLight = false; /* FIH-SW3-MM-UW-fix night capture fail-00+*/
+///*MTD-MM-SL-ModifyPicDetailInfo-01-*/ static bool LowLight = false; /* FIH-SW3-MM-UW-fix night capture fail-00+*/
 
 
 static DECLARE_WAIT_QUEUE_HEAD(isx006_wait_queue);
@@ -185,6 +205,8 @@ static bool bRegInitDone = false;
 //FIH-SW-MM-MC-ReduceMainCameraLaunchTime-00+}
 
 static long isx006_set_scene(int scene);//Div2-SW6-MM-MC-EnhanceStabilityForMainCamera-00+
+bool isx006_get_AE_value(void); /*MTD-MM-SL-ModifyPicDetailInfo-01+*/
+int isx006_power_off(void);
 
 //Div2-SW6-MM-MC-EnhanceStabilityForMainCamera-00+{
 static int isx006_i2c_rxdata(unsigned short saddr,
@@ -234,14 +256,14 @@ static int isx006_i2c_rxdata_nonAck(unsigned short saddr,
             .buf   = rxdata,
         },
     };
-        printk("isx006_i2c_rxdata_nonAck: enter\n");
+    //printk("isx006_i2c_rxdata_nonAck: enter\n");
     
     address = (*rxdata << 8)+ *(rxdata+1);
 
     for(i = 0; i < 50; i++)
     {
         if (i2c_transfer(isx006_client->adapter, msgs, 2) >= 0) {
-                printk("isx006_i2c_rxdata_nonAck pass 0x%x\n", saddr);
+                //printk("isx006_i2c_rxdata_nonAck pass 0x%x\n", saddr);
                 return 0;
         }
         cam_msleep(10);
@@ -379,12 +401,12 @@ static int32_t isx006_i2c_txdata_nonAck(unsigned short saddr,
          .buf = txdata,
          },
     };
-    printk("isx006_i2c_txdata_nonAck: enter\n");
+    //printk("isx006_i2c_txdata_nonAck: enter\n");
 
     for(i = 0; i < 50; i++)
     {
         if (i2c_transfer(isx006_client->adapter, msg, 1) >= 0) {
-            printk("isx006_i2c_txdata_nonAck pass 0x%x\n", isx006_client->addr);
+            //printk("isx006_i2c_txdata_nonAck pass 0x%x\n", isx006_client->addr);
             return 0;            
         }
         cam_msleep(10);
@@ -912,6 +934,8 @@ static int isx006_check_AF(unsigned short saddr, const char *tag)
         //printk("isx006_check_AF: AF searching..\n");
         if(isx006_scene == SCENE_NIGHT)
             cam_msleep(40); 
+        else if(AF_type)
+            cam_msleep(4);
         else
             cam_msleep(10);    
         return -EIO;
@@ -972,19 +996,22 @@ error:
 /* FIH-SW3-MM-UW-performance tuning-00-*/
 /* FIH-SW3-MM-UW-fix night capture fail-00-*/
 
+/* FIH-SW3-MM-UW-flash tuning-04+*/
+/* FIH-SW3-MM-UW-flash tuning-03+*/
+/*MTD-MM-SL-ModifyPicDetailInfo-01*{*/
 /* FIH-SW3-MM-UW-flash tuning-00+*/
 /* FIH-SW3-MM-UW-fix capture fail-00+*/
 static int isx006_get_AF_state(unsigned short saddr, const char *tag)
 {
-        int i = 0;
-        int rc = 0;
-        int led_mode = 0;
-        uint16_t v_read = 0x0;    
-        uint16_t v_temp = 0x0;        
-        uint16_t AF_result = 0xFF;
-        uint16_t AF_state = 0xFF;
-        uint16_t Diff = 0xFFFF;
-        int Diff_index = 0;
+    int i = 0;
+    int rc = 0;
+    int led_mode = 0;
+    uint16_t v_read = 0x0;
+    uint16_t v_temp = 0x0;
+    uint16_t AF_result = 0xFF;
+    uint16_t AF_state = 0xFF;
+    bool recover_AE = false;
+
         printk("isx006_get_AF_state: enter\n");
    
         led_mode = msm_soc_get_led_mode();
@@ -995,110 +1022,27 @@ static int isx006_get_AF_state(unsigned short saddr, const char *tag)
 
         if( led_mode == LED_MODE_RED_EYE || led_mode == LED_MODE_AUTO)
         {  
-            if(LowLight)
-                 torch_enable = true;
+            if(torch_enable)
+                 recover_AE = true;
         }
 
-        if( led_mode == LED_MODE_ON || torch_enable == true)
+        if( led_mode == LED_MODE_ON || recover_AE == true)
         {
-                /* 02.Check HALF_MOVE_STS ------------------------------------------------------*/
-
-                /* Make sure operation mode is changed */
-                for (i = 0; i < ISX006_CM_RETRY_COUNT; i++)
-                {
-                    rc = isx006_i2c_read_parallel(saddr, 0x02AA, &v_read, BYTE_LEN);
-                    if (rc < 0) {
-                        pr_err("isx006_get_AF_state: isx006_i2c_read_parallel failed, REG(0x%x) !\n", 0x02AA);
-                        goto error;
-                    }
-                    if (v_read == 0)
-                        break;
-                    cam_msleep(10);    
-                }
-
-                if (i >= ISX006_CM_RETRY_COUNT)
-                {
-                    rc = -ETIME;
-                    pr_err("isx006_get_AF_state: check HALF_MOVE_STS fail !!!\n");
-                    goto error;
-                }
-                
-                /* 03.Check AF_STATE = Lock Done --------------------------------------------------*/
-
-                for (i = 0; i < ISX006_CM_RETRY_COUNT; i++)
-                {
-                    rc = isx006_i2c_read_parallel(saddr, 0x6D76, &v_read, BYTE_LEN);
-                    if (rc < 0) {
-                        pr_err("isx006_get_AF_state: isx006_i2c_read_parallel failed, REG(0x%x) !\n", 0x02AA);
-                        goto error;
-                    }
-                    if (v_read == 8)
-                        break;
-                    cam_msleep(10);    
-                }
-
-                if (i >= ISX006_CM_RETRY_COUNT)
-                {
-                    rc = -ETIME;
-                    pr_err("isx006_get_AF_state: check AF_STATE = Lock Done fail !!!\n");
-                    goto error;
-                }
-
-                
-                /* 04.Read AE scale ---------------------------------------------------------------*/
-                printk("isx006_get_AF_state: Camera mode changed\n");
-
-                if (slave_add == isx006_client->addr)
-                {
-                    rc = isx006_i2c_read_parallel(isx006_client->addr, 0x028A, &AESCL_NOW, WORD_LEN);   
-                }else{
-                    rc = isx006_i2c_read(isx006_client->addr, 0x028A, &AESCL_NOW, WORD_LEN);
-                }  
-
-                if (slave_add == isx006_client->addr)
-                {
-                    rc = isx006_i2c_read_parallel(isx006_client->addr, 0x0286, &ERRSCL_NOW, WORD_LEN);   
-                }else{
-                    rc = isx006_i2c_read(isx006_client->addr, 0x0286, &ERRSCL_NOW, WORD_LEN);
-                }  
-                if(rc < 0) {
-                    printk("isx006_get_AF_state: read AE scale failed !\n");
-                    goto error;
-                }
-
-                /*printk("isx006_get_AF_state: AESCL_AUTO = %d, ERRSCL_AUTO = %d\n", AESCL_AUTO, ERRSCL_AUTO);
-                printk("isx006_get_AF_state: AESCL_NOW = %d, ERRSCL_NOW = %d\n", AESCL_NOW, ERRSCL_NOW);*/
-
-                Diff = (AESCL_NOW + ERRSCL_NOW) -(AESCL_AUTO + ERRSCL_AUTO);
-                /*printk("isx006_get_AF_state: Diff = %d \n", Diff);
-                printk("isx006_get_AF_state: Diff_0 = %d \n", (Diff/10) * 10);
-                printk("isx006_get_AF_state: Diff_1 = %d \n", (Diff/10 + 1) * 10);*/
-
-                /* -----------------------------------------------------------------------------*/
-                if((Diff - (Diff/10) * 10) < 5)
-                    Diff_index = (Diff/10);
-                else
-                    Diff_index = (Diff/10) + 1;
-                printk("isx006_get_AF_state: Diff_index = %d \n", Diff_index);
-
-                rc = isx006_i2c_write_parallel(isx006_client->addr, 0x0282, x_1_5[Diff_index], WORD_LEN);
-                
                 /* 05.Turn off pre-flash------------------------------------------------------------*/
                 printk("isx006_get_AF_state: flash off!\n");
                 rc = msm_soc_torch_flash_off();
                 if (rc < 0)
                     printk("isx006_get_AF_state: msm_soc_torch_flash_off() failed !\n");
                 cam_msleep(50);
-                
         }
 
-        /* 01.Check the AF result register -------------------------------------------------------*/
+         /* 01.Check the AF result register -------------------------------------------------------*/
         rc = isx006_i2c_read_parallel(isx006_client->addr, 0x6D77, &AF_result, BYTE_LEN);//ADD_AF_RESULT = 0x6D77
         if (rc < 0) {
             pr_err("isx006_get_AF_state: isx006_i2c_read_parallel(0x0004) failed !\n");
             goto error;
         }
-        
+
         if(AF_result == AF_OK){
             printk("isx006_get_AF_state: AF result is AF OK!!!!\n");
         }
@@ -1110,7 +1054,7 @@ static int isx006_get_AF_state(unsigned short saddr, const char *tag)
             rc = isx006_i2c_read_parallel(isx006_client->addr, 0x4885, &v_read, BYTE_LEN);
             v_temp = v_read | 0x01;    
             rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4885, v_temp, BYTE_LEN);
-        
+
             for (i = 0; i < 30; i++)
             {
                 rc = isx006_i2c_read_parallel(isx006_client->addr, 0x6D76, &AF_state, BYTE_LEN);
@@ -1134,6 +1078,9 @@ static int isx006_get_AF_state(unsigned short saddr, const char *tag)
 /* FIH-SW3-MM-UW-cancel AF-00-*/
 /* FIH-SW3-MM-UW-fix capture fail-00-*/
 /* FIH-SW3-MM-UW-flash tuning-00-*/
+/*MTD-MM-SL-ModifyPicDetailInfo-01*}*/
+/* FIH-SW3-MM-UW-flash tuning-03-*/
+/* FIH-SW3-MM-UW-flash tuning-04-*/
 
 /* FIH-SW3-MM-UW-fix AF not work-00+*/
 /*MM-UW-reduce knocking noise-00+*/
@@ -1232,6 +1179,57 @@ static uint32_t isx006_get_pict_max_exp_lc(void)
         return snap_frame_length_lines;
 }
 
+/* FIH-SW3-MM-UW-flash tuning-04+*/
+/*MTD-MM-SL-ModifyPicDetailInfo-01+{*/
+bool isx006_get_AE_value(void)
+{
+        int32_t AE_value = 0;
+        int32_t AE_target = 0x0000FD52 - 0x0000FFFF - 1;
+        bool Low_Light = false;
+        uint16_t read_value = 0;
+        int rc = 0;
+
+        printk("isx006_get_AE_value: enter\n");
+
+        /*Get AESCL_AUTO--------------------------------------------------------------------*/
+        if (slave_add == isx006_client->addr)
+        {
+            rc = isx006_i2c_read_parallel(isx006_client->addr, 0x0288, &read_value, WORD_LEN);
+        }else{
+            rc = isx006_i2c_read(isx006_client->addr, 0x0288, &read_value, WORD_LEN);
+        }
+        AESCL_AUTO = read_value;
+
+        /*Get ERRSCL_AUTO--------------------------------------------------------------------*/
+
+        if (slave_add == isx006_client->addr)
+        {
+            rc = isx006_i2c_read_parallel(isx006_client->addr, 0x0284, &read_value, WORD_LEN);
+        }else{
+            rc = isx006_i2c_read(isx006_client->addr, 0x0284, &read_value, WORD_LEN);
+        }
+        if(rc < 0) {
+            printk("isx006_get_AE_value: read AE value failed !\n");
+        }
+
+        if( read_value >= 0x00008000 )
+            ERRSCL_AUTO = (read_value - 0x0000FFFF -1);
+        else
+            ERRSCL_AUTO = (read_value & 0x0000FFFF);
+
+        AE_value = ERRSCL_AUTO;
+
+        if(AE_value <= AE_target)
+        {
+            Low_Light = true;
+            printk("isx006_get_AE_value: low light condition !\n");
+        }
+
+        return Low_Light;
+}
+/*MTD-MM-SL-ModifyPicDetailInfo-01+}*/
+/* FIH-SW3-MM-UW-flash tuning-04-*/
+
 int isx006_polling_state_change(unsigned short saddr, enum isx006_device_status polling_status)
 {
     int rc = 0;
@@ -1249,7 +1247,14 @@ int isx006_polling_state_change(unsigned short saddr, enum isx006_device_status 
             goto error;
         }
         if (now_status != polling_status)
+        {
+            rc = -EINVAL;
+        }
+        else
+        {
             printk("isx006_polling_state_change(%d): now_status(0x%x), polling_status(0x%x).\n", count, now_status, polling_status);
+            rc = 0;
+        }
     } while( (polling_status != now_status) && (count < max_polling));
 
     if (rc < 0 || count >= max_polling)
@@ -1282,11 +1287,16 @@ int isx006_polling_state_change(unsigned short saddr, enum isx006_device_status 
         printk("isx006_polling_state_change: Polling failed, status = STS_UNKNOWN !\n");
         break;
     }
+
+    return rc;
     
 error:
+    printk("isx006_polling_state_change fail: now_status(0x%x), polling_status(0x%x).\n", now_status, polling_status);
     return rc;
 }
 
+/* FIH-SW3-MM-UW-enhance stability-00+*/
+/* FIH-SW3-MM-UW-in_out standby fail -00+*/
 //Div2-SW6-MM-MC-EnhanceStabilityForMainCamera-00*{
 /*MM-UW-improve camera close performance-00+*/
 //FIH-SW-MM-MC-EnableHWStandby-00*{
@@ -1305,43 +1315,37 @@ int isx006_enter_standby(void)
     
     //cam_msleep(136);//T1 duration(max)
 
-    rc = isx006_check_om_nonAck(isx006_client->addr, "For change to PreSleep mode");
+    rc = isx006_check_om_nonAck(isx006_client->addr, "For change to Sleep mode");
         if (rc < 0) {
-        pr_err("isx006_enter_standby: isx006_check_om(For change to PreSleep mode) failed !\n");
+        pr_err("isx006_enter_standby: isx006_check_om_nonAck(For change to Sleep mode) failed !\n");
         goto error;
     }
 
     /* Here to check ststus is STS_SLEEP */
     rc = isx006_polling_state_change(isx006_client->addr, STS_SLEEP);
-    if (rc < 0) {
-        pr_err("isx006_enter_standby: isx006_polling_state_change(STS_SLEEP) failed !\n");
-        goto error;
+    if (!rc) {
+        printk("isx006_enter_standby: isx006_polling_state_change(STS_SLEEP) success !\n");
+        rc = fih_disable_mclk(isx006_info->mclk, ISX006_MASTER_CLK_RATE);
+        if (rc < 0) {
+            goto error;
+        }
+        cam_msleep(5);
     }
 
-    /*MM-UW-Standby with MCLK off-00+*/
-    rc = fih_disable_mclk(isx006_info->mclk, ISX006_MASTER_CLK_RATE);
-    if (rc < 0) {
-        goto error;
-    }
-    cam_msleep(5);
-    /*MM-UW-Standby with MCLK off-00-*/
-    
     printk("isx006_enter_standby: Success !\n");
     return rc;
-    
+
 error:
     printk("isx006_enter_standby: Failed !\n");
     return rc;
 }
+/* FIH-SW3-MM-UW-enhance stability-00-*/
 
 int isx006_exit_standby(enum Exit_Standby_Action act)
 {
     int rc = 0;
     uint16_t status = 0xFFFF;
     
-    rc = isx006_i2c_read_parallel(isx006_client->addr, 0x00FE, &status, BYTE_LEN);
-    printk("isx006_exit_standby: camera om status = %d!\n", status);
-
     switch (act) {
     case ACT_MCLK_ON:
         {
@@ -1351,7 +1355,14 @@ int isx006_exit_standby(enum Exit_Standby_Action act)
                 goto error;
             }
             cam_msleep(50); /*MTD-MM-SL-EnhanceStandby-00*/ //5
-            printk("isx006_exit_standby: MCLK on success.\n");
+
+            //FIH-SW-MM-MC-ImplementSensorReSetForIsx006-03+{
+            rc = isx006_i2c_read_parallel(isx006_client->addr, 0x00FE, &status, BYTE_LEN);
+            if (rc < 0)
+                printk("isx006_exit_standby: Can not read camera om status after MCLK enable ..\n");
+            else
+                printk("isx006_exit_standby: [Success] Camera om status = %d ! (MCLK ON)\n", status);
+            //FIH-SW-MM-MC-ImplementSensorReSetForIsx006-03+}
         }
         break;
             
@@ -1383,8 +1394,13 @@ int isx006_exit_standby(enum Exit_Standby_Action act)
                 pr_err("isx006_exit_standby: isx006_check_cm(For CM change to Monitor mode) failed !\n");
                 goto error;
             }
-            
-            printk("isx006_exit_standby: Exit success.\n");
+            //FIH-SW-MM-MC-ImplementSensorReSetForIsx006-03+{
+            rc = isx006_i2c_read_parallel(isx006_client->addr, 0x00FE, &status, BYTE_LEN);
+            if (rc < 0)
+                printk("isx006_exit_standby: Can not read camera om status after exit standby mode ..\n");
+            else
+                printk("isx006_exit_standby: [Success] Camera om status = %d ! (Exit standby mode)\n", status);
+            //FIH-SW-MM-MC-ImplementSensorReSetForIsx006-03+}
         }
         break;
             
@@ -1405,6 +1421,7 @@ error:
 }
 //FIH-SW-MM-MC-EnableHWStandby-00*}
 /*MM-UW-improve camera close performance-00-*/
+/* FIH-SW3-MM-UW-in_out standby fail -00 -*/
 
 /*MM-UW-improve camera performance-00+*/
 /*MM-UW-EnableHWStandby-00+*/
@@ -1458,6 +1475,7 @@ int isx006_set_camera_mode(enum isx006_mode new_mode, const char *tag)
     int rc = 0;
     uint16_t v_read;
     uint16_t v_temp;
+	uint16_t byte_value = 0xFF; /* MTD-MM-SL-CheckCMFail-00+ */
 
     /* Clear interrupt status */
     /* FIH-SW3-MM-UW-performance tuning-00+*/
@@ -1476,7 +1494,14 @@ int isx006_set_camera_mode(enum isx006_mode new_mode, const char *tag)
     cam_msleep(10);   
     /* FIH-SW3-MM-UW-performance tuning-00-*/
 
-    printk("isx006_set_camera_mode: pre set camera mode to %s\n", tag);
+	/* MTD-MM-SL-CheckCMFail-00*{*/
+	rc = isx006_i2c_read_parallel(isx006_client->addr, 0x0004, &byte_value, BYTE_LEN);
+    if (rc < 0) {
+        pr_err("isx006_set_camera_mode: Try to get current mode failed !\n");
+        return rc;
+    }
+    printk("isx006_set_camera_mode: pre set camera mode to %s, REG_0x0004 = 0x%x\n", tag, byte_value);
+	/* MTD-MM-SL-CheckCMFail-00*}*/
     rc = isx006_i2c_write_parallel(isx006_client->addr, 0x0011, new_mode, BYTE_LEN);
     if (rc < 0) {
         pr_err("isx006_set_camera_mode: isx006_i2c_write_parallel(0x0011) failed !\n");
@@ -1491,21 +1516,19 @@ error:
     return rc;
 }
 
+/* FIH-SW3-MM-UW-read vendor id-02+*/
+/* FIH-SW3-MM-UW-read vendor id-00+*/
 /* FIH-SW3-MM-UW-add touch AF-00+*/
 /* FIH-SW3-MM-UW-write OTP setting-00+*/
-int isx006_OTP_setting(void) 
+int isx006_OTP_get(void)
 {
     int rc = 0;
     uint32_t read_value;
 
-    uint16_t I_NORMR = 0x10BD;    
-    uint16_t I_NORMB = 0x0EE0;
-    uint16_t I_AWB_PRER = 0x0146;
-    uint16_t I_AWB_PREB = 0x0239;    
-    uint16_t NORMR;    
-    uint16_t NORMB;
-    uint16_t AWB_PRER;
-    uint16_t AWB_PREB;    
+    uint16_t I_NORMR;
+    uint16_t I_NORMB;
+    uint16_t I_AWB_PRER;
+    uint16_t I_AWB_PREB;
     
     isx006_i2c_read_parallel_32bit(slave_add, 0x0250, &read_value);    
     OTP_0_value = read_value;    
@@ -1516,7 +1539,11 @@ int isx006_OTP_setting(void)
 
     printk("isx006_OTP_setting: 0x0250 = 0x%x\n", OTP_0_value);    
     printk("isx006_OTP_setting: 0x0254 = 0x%x\n", OTP_1_value);
-    printk("isx006_OTP_setting: 0x0258 = 0x%x\n", OTP_2_value);    
+    printk("isx006_OTP_setting: 0x0258 = 0x%x\n", OTP_2_value);
+
+    /* Vendor ID -----------------------------------------*/
+    vendor_id = (OTP_2_value >>24) & 0x00000001;
+    printk("isx006_OTP_setting: vendor_id = %d\n", vendor_id);
 
     /* AF position -----------------------------------------------*/    
     AF_A_value = (uint16_t) ((OTP_0_value >> 5  ) & 0x000003FF);    
@@ -1524,16 +1551,24 @@ int isx006_OTP_setting(void)
     printk("isx006_OTP_setting:AF_A_value = %d\n", AF_A_value);
     printk("isx006_OTP_setting:AF_B_value = %d\n", AF_B_value);    
 
-    /*MM-UW-reduce knocking noise-00+*/
     AF_F_value = 8; //coarse search
     AF_C_value = (AF_B_value - AF_A_value) / (AF_F_value - 2) + 1;
     printk("isx006_OTP_setting+: AF_C_value =%d \n", AF_C_value);
+    /* Pre-White Balance -----------------------------------------*/
+    if(!vendor_id) //KMOT
+    {
+        I_NORMR = 0x10FB;
+        I_NORMB = 0x10AB;
+        I_AWB_PRER = 0x013C;
+        I_AWB_PREB = 0x0241;
+    }else
+    {
+        I_NORMR = 0x10BD;
+        I_NORMB = 0x0EE0;
+        I_AWB_PRER = 0x0146;
+        I_AWB_PREB = 0x0239;
+    }
     
-    isx006_i2c_write_parallel(isx006_client->addr, 0x495E, AF_B_value - AF_C_value, WORD_LEN);
-    isx006_i2c_write_parallel(isx006_client->addr, 0x4960, AF_A_value , WORD_LEN);  
-    isx006_i2c_write_parallel(isx006_client->addr, 0x4962, AF_A_value + AF_C_value, WORD_LEN); 
-    /*MM-UW-reduce knocking noise-00-*/
-    /* Pre-White Balance -----------------------------------------*/    
     C_NR = (uint16_t) (((OTP_1_value << 6 ) & 0x000000C0) | ((OTP_0_value >> 26  ) & 0x0000003F));    
     C_NB = (uint16_t) ((OTP_1_value >> 2 ) & 0x000000FF);
     C_PR = (uint16_t) ((OTP_1_value >> 10 ) & 0x000000FF);
@@ -1552,14 +1587,58 @@ int isx006_OTP_setting(void)
     printk("isx006_OTP_setting: AWB_PRER = 0x%x\n", AWB_PRER);        
     printk("isx006_OTP_setting: AWB_PREB = 0x%x\n", AWB_PREB);    
 
+    /* Lens Shading ----------------------------------------------*/
+    Shading_index = (uint16_t) ((OTP_2_value >> 20 ) & 0x0000000F);
+    printk("isx006_OTP_setting:Shading_index = %d\n", Shading_index);
+
+    return rc;
+}
+/* FIH-SW3-MM-UW-add touch AF-00-*/
+/* FIH-SW3-MM-UW-read vendor id-00-*/
+/* FIH-SW3-MM-UW-read vendor id-02-*/
+
+int isx006_OTP_setting(void)
+{
+    int rc = 0;
+
+    /* AF position -----------------------------------------------*/
+    isx006_i2c_write_parallel(slave_add, 0x495E, AF_B_value - AF_C_value, WORD_LEN); //reduce knocking noise
+    isx006_i2c_write_parallel(slave_add, 0x4960, AF_A_value , WORD_LEN);
+    isx006_i2c_write_parallel(slave_add, 0x4962, AF_A_value + AF_C_value, WORD_LEN);
+
+    /* Pre-White Balance -----------------------------------------*/
     isx006_i2c_write_parallel(slave_add, 0x4A04, NORMR, WORD_LEN);
     isx006_i2c_write_parallel(slave_add, 0x4A06, NORMB, WORD_LEN);
     isx006_i2c_write_parallel(slave_add, 0x4A08, AWB_PRER, WORD_LEN);
     isx006_i2c_write_parallel(slave_add, 0x4A0A, AWB_PREB, WORD_LEN);
 
+    /* Lens Shading ----------------------------------------------*/
+    if(!vendor_id) //KMOT
+    {
+        printk("isx006_OTP_setting:write shading table \n");
+        switch (Shading_index) {
+        case SHD_MIN:
+		rc = isx006_i2c_write_table_parallel(slave_add, isx006_regs.reg_SHD_MIN_2nd,
+                   isx006_regs.reg_SHD_MIN_2nd_size);
+		break;
+
+        case SHD_TYP:
+		rc = isx006_i2c_write_table_parallel(slave_add, isx006_regs.reg_SHD_TYP_2nd,
+                   isx006_regs.reg_SHD_TYP_2nd_size);
+		break;
+
+        case SHD_MAX:
+		rc = isx006_i2c_write_table_parallel(slave_add, isx006_regs.reg_SHD_MAX_2nd,
+                   isx006_regs.reg_SHD_MAX_2nd_size);
+		break;
+       }
+    }
+    if(rc < 0)
+        printk("isx006_OTP_setting:write shading table fail\n");
+
     return rc;    
 }
-/* FIH-SW3-MM-UW-add touch AF-00-*/
+
 
 int isx006_change_slave_address(void)
 {
@@ -1628,11 +1707,13 @@ error:
     return rc;
 }
 
+/* FIH-SW3-MM-UW-read vendor id-02+*/
 /* FIH-SW3-MM-UW-write OTP setting-00+*/
 int isx006_init_sensor(void)
 {
     int rc = 0;
 
+    /* <0>. Pre-Sleep mode ---------------------------- */
     rc = isx006_check_om(slave_add, "For change to PreSleep mode");
     if (rc < 0) {
         pr_err("isx006_init_sensor: isx006_check_om(For change to PreSleep mode) failed !\n");
@@ -1646,7 +1727,7 @@ int isx006_init_sensor(void)
         goto error;
     }
 
-    /* <2>. Pre-Sleep mode */   
+    /* <0-1>. Write init setting */
     rc = isx006_i2c_write_table_parallel(slave_add, isx006_regs.reg_init, isx006_regs.reg_init_size); 
     if (rc < 0) {
         pr_err("isx006_init_sensor: Write Period1 table failed !\n");
@@ -1654,7 +1735,8 @@ int isx006_init_sensor(void)
     }
     printk("isx006_init_sensor: Sensor init done.\n");
     cam_msleep(1);//0.2ms//T3 duration(max)
-    
+
+    /* <1>. Pre-Sleep mode ---------------------------- */
     rc = isx006_check_om(slave_add, "For change to Sleep mode");
     if (rc < 0) {
         pr_err("isx006_init_sensor: isx006_check_om(For change to Sleep mode) failed !\n");
@@ -1667,8 +1749,18 @@ int isx006_init_sensor(void)
         pr_err("isx006_init_sensor: isx006_polling_state_change(STS_SLEEP) failed !\n");
         goto error;
     }
-    
-    rc = isx006_i2c_write_table_parallel(slave_add, isx006_regs.reg_preload2, isx006_regs.reg_preload2_size);
+
+    /* <1-1>. Write preload2 setting */
+    if(!vendor_id) //KMOT
+    {
+        printk("isx006_init_sensor: Sensor Period2 for 2nd source.\n");
+        rc = isx006_i2c_write_table_parallel(slave_add, isx006_regs.reg_preload2_2nd, isx006_regs.reg_preload2_2nd_size);
+    }
+    else
+    {
+        printk("isx006_init_sensor: Sensor Period2 for main source.\n");
+        rc = isx006_i2c_write_table_parallel(slave_add, isx006_regs.reg_preload2, isx006_regs.reg_preload2_size);
+    }
     if (rc < 0) {
         pr_err("isx006_init_sensor: Write Period2 table failed !\n");
         goto error;
@@ -1676,13 +1768,32 @@ int isx006_init_sensor(void)
     printk("isx006_init_sensor: Sensor Period2 done.\n");
     cam_msleep(5);
 
-    rc = isx006_i2c_write_table_parallel(slave_add, isx006_regs.reg_preload3, isx006_regs.reg_preload3_size);
+    /* <1-2>. Write preload2 setting */
+    if(!vendor_id) //KMOT
+    {
+        printk("isx006_init_sensor: Sensor Period3 for 2nd source.\n");
+        rc = isx006_i2c_write_table_parallel(slave_add, isx006_regs.reg_preload3_2nd, isx006_regs.reg_preload3_2nd_size);
+    }
+    else
+    {
+        rc = isx006_i2c_write_table_parallel(slave_add, isx006_regs.reg_preload3, isx006_regs.reg_preload3_size);
+        printk("isx006_init_sensor: Sensor Period3 for main source.\n");
+    }
     if (rc < 0) {
         pr_err("isx006_init_sensor: Write Period3 table failed !\n");
         goto error;
     }
     printk("isx006_init_sensor: Sensor Period3 done.\n");
     cam_msleep(5); 
+
+    /* <1-3>. Write OTP setting */
+    if(slave_add == isx006_client->addr)
+    {
+        rc = isx006_OTP_setting();
+        if (rc < 0) {
+            pr_err("isx006_reg_init_task: OTP read/save value failed !\n");
+        }
+    }
     
     printk("isx006_init_sensor: Success.\n");   
     return rc;
@@ -1692,6 +1803,7 @@ error:
     return rc;
 }
 /* FIH-SW3-MM-UW-write OTP setting-00-*/
+/* FIH-SW3-MM-UW-read vendor id-02-*/
 
 /* FIH-SW3-MM-UW-AF power-00+*/
 /*MM-UW-support AF+++*/
@@ -1899,6 +2011,52 @@ int isx006_resume(struct platform_device *pdev)
 }
 //FIH-SW-MM-MC-EnableHWStandby-00*}
 
+/* FIH-SW3-MM-UW-flash tuning-04+*/
+int isx006_PreFlash_setting(void)
+{
+    int rc = 0;
+
+    /* Set LED & AE/AWB Control----------------------------*/
+    rc = isx006_i2c_write_parallel(isx006_client->addr, 0x0069, 0x0D, BYTE_LEN);
+    if (rc < 0) {
+        pr_err("isx006_set_AF: saddr(0x%x): Write REG(0x%x) failed !\n",isx006_client->addr, 0x0069);
+        return-EIO;
+    }
+    rc = isx006_i2c_write_parallel(isx006_client->addr, 0x02C4, 0x0010, WORD_LEN);
+    if (rc < 0) {
+        pr_err("isx006_set_AF: saddr(0x%x): Write REG(0x%x) failed !\n",isx006_client->addr, 0x02C4);
+        return-EIO;
+    }
+    rc = isx006_i2c_write_parallel(isx006_client->addr, 0x027D, 0x05, BYTE_LEN);
+    if (rc < 0) {
+        pr_err("isx006_set_AF: saddr(0x%x): Write REG(0x%x) failed !\n",isx006_client->addr, 0x027D);
+        return-EIO;
+    }
+    rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4066, 0x0F, BYTE_LEN);
+    if (rc < 0) {
+        pr_err("isx006_snapshot_config: saddr(0x%x): Write REG(0x%x) failed !\n",isx006_client->addr, 0x4066);
+        return-EIO;
+    }
+    rc = isx006_i2c_write_parallel(isx006_client->addr, 0x402F, 0x0B, BYTE_LEN);
+    if (rc < 0) {
+        pr_err("isx006_snapshot_config: saddr(0x%x): Write REG(0x%x) failed !\n",isx006_client->addr, 0x402F);
+        return-EIO;
+    }
+    rc = isx006_i2c_write_parallel(isx006_client->addr, 0x404C, 0x2C, BYTE_LEN);
+    if (rc < 0) {
+        pr_err("isx006_snapshot_config: saddr(0x%x): Write REG(0x%x) failed !\n",isx006_client->addr, 0x404C);
+        return-EIO;
+    }
+    rc = isx006_i2c_write_parallel(isx006_client->addr, 0x400B, 0x3C, BYTE_LEN);
+    if (rc < 0) {
+        pr_err("isx006_snapshot_config: saddr(0x%x): Write REG(0x%x) failed !\n",isx006_client->addr, 0x400B);
+        return-EIO;
+    }
+
+    return rc;
+}
+/* FIH-SW3-MM-UW-flash tuning-04-*/
+
 /*MM-UW-reduce knocking noise-00+*/
 /*MM-UW-add auto flash 00+*/
 /* FIH-SW3-MM-UW-add reduce_red_eye-00+*/
@@ -1945,32 +2103,18 @@ error:
 }
 /*MM-UW-reduce knocking noise-00-*/
 
+/* FIH-SW3-MM-UW-modify touch AF-00+*/
+/* FIH-SW3-MM-UW-fast AF-00+*/
 /* FIH-SW3-MM-UW-add touch AF-00+*/
 static long isx006_set_touch_focus(uint16_t x, uint16_t y, uint16_t dx, uint16_t dy, uint8_t num_roi, uint16_t preview_ratio) 
 {
     int rc = 0;
-    uint16_t v_read = 0x0;    
-    uint16_t v_temp = 0x0;    
-    uint16_t window_size_x = 600;    
+    uint16_t window_size_x = 800;
     uint16_t window_size_y = 600;    
-    uint16_t reset_window_size_x = 900;    
+    uint16_t reset_window_size_x = 1000;
     uint16_t reset_window_size_y = 800;    
     uint16_t focus_limit_size_x = 2592 - 33 - window_size_x;    
     uint16_t focus_limit_size_y = 1944 - 5 - window_size_y;    
-    
-    //0. AF reset
-    rc = isx006_i2c_read_parallel(isx006_client->addr, 0x0015, &v_read, BYTE_LEN);
-    if (rc < 0) {
-        pr_err("isx006_set_touch_focus: isx006_i2c_read_parallel(0x0015) failed !\n");
-        goto error;
-    }
-
-    v_temp = v_read | 0x01;    
-    rc = isx006_i2c_write_parallel(isx006_client->addr, 0x0015, v_temp, BYTE_LEN);
-    if (rc < 0) {
-        pr_err("isx006_set_touch_focus: isx006_i2c_write_parallel(0x0015) failed !\n");
-        goto error;
-    }
 
     printk("isx006_set_touch_focus: af_rect{x,y,dx,dy,num_roi} before= {%d,%d,%d,%d,%d} -----------\n", x, y, dx, dy, num_roi);
 
@@ -2059,12 +2203,49 @@ static long isx006_set_touch_focus(uint16_t x, uint16_t y, uint16_t dx, uint16_t
         goto error;
     }
 
+    //1. Set monitor AF mode
+    rc = isx006_i2c_write_parallel(isx006_client->addr, 0x002E, MONI_AF_OFF, BYTE_LEN);
+    if (rc < 0) {
+        pr_err("isx006_set_monitor_af_mode: isx006_i2c_write_parallel(0x002E) failed !\n");
+        goto error;
+    }
+
+    //2. MONI_REFRESH
+    rc = isx006_i2c_write_parallel(isx006_client->addr, 0x0012, 0x01, BYTE_LEN);
+    if (rc < 0) {
+        pr_err("isx006_set_monitor_af_mode: isx006_i2c_write_parallel(0x0012) failed for refresh !\n");
+        goto error;
+    }
+    cam_msleep(50);
+
+    rc = isx006_i2c_write_parallel(isx006_client->addr, 0x002E, MONI_AF_SAF, BYTE_LEN);
+    if (rc < 0) {
+        pr_err("isx006_set_monitor_af_mode: isx006_i2c_write_parallel(0x002E) failed !\n");
+        goto error;
+    }
+
+    //2. MONI_REFRESH
+    rc = isx006_i2c_write_parallel(isx006_client->addr, 0x0012, 0x01, BYTE_LEN);
+    if (rc < 0) {
+        pr_err("isx006_set_monitor_af_mode: isx006_i2c_write_parallel(0x0012) failed for refresh !\n");
+        goto error;
+    }
+
+    AF_skip = true;
+
 error:
     return rc;
 }
 /* FIH-SW3-MM-UW-add touch AF-00-*/
+/* FIH-SW3-MM-UW-fast AF-00-*/
 //FIH-SW-MM-MC-ImplementTouchFocusAndCAF-00+}
+/* FIH-SW3-MM-UW-modify touch AF-00-*/
 
+/* FIH-SW3-MM-UW-2nd night mode AF fail-00+*/
+/* FIH-SW3-MM-UW-read vendor id-00+*/
+/* FIH-SW3-MM-UW-fix Macro AF fail-00+*/
+/* FIH-SW3-MM-UW-flash tuning-06+*/
+/* FIH-SW3-MM-UW-fix AF noise-00+*/
 /* FIH-SW3-MM-UW-set AF range-00+*/ 
 /* FIH-SW3-MM-UW-write OTP setting-00+*/
 int isx006_set_AF_Range(int af_mode) 
@@ -2103,7 +2284,7 @@ int isx006_set_AF_Range(int af_mode)
             goto error;
 
         AF_D_value = (AF_C_value / AF_H_value);
-        /*printk("isx006_set_AF_Range: AF_D_value =%d \n", AF_D_value); */   
+        /*printk("isx006_set_AF_Range: AF_D_value =%d \n", AF_D_value);*/
 
         rc = isx006_i2c_write_parallel(isx006_client->addr, 0x486E, AF_D_value, WORD_LEN);
         if (rc < 0)
@@ -2117,15 +2298,20 @@ int isx006_set_AF_Range(int af_mode)
         /*printk("isx006_set_AF_Range: AF_E_value =%d \n", AF_E_value);*/
 
         /* full */
-        rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4876, AF_A_value, WORD_LEN);//AF_AREA_LOW_TYPE1
+        if(vendor_id) //SEMCO
+            rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4876, AF_A_value + 30, WORD_LEN);//AF_AREA_LOW_TYPE1
+        else
+        {
+            rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4876, AF_A_value, WORD_LEN);//AF_AREA_LOW_TYPE1
+        }
         if (rc < 0)
             goto error;
 
-        rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4878, AF_B_value, WORD_LEN);//AF_AREA_HIGH_TYPE1
+        rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4878, AF_B_value + (AF_C_value * 2), WORD_LEN);//AF_AREA_HIGH_TYPE1
         if (rc < 0)
            goto error;
 
-        rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4884, AF_C_value * 2, WORD_LEN);
+        rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4844, AF_D_value * 4, WORD_LEN);
         if (rc < 0)
            goto error;
 
@@ -2133,15 +2319,15 @@ int isx006_set_AF_Range(int af_mode)
         if (rc < 0)
            goto error;
 
-        rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4822, AF_D_value / 2, WORD_LEN);
+        rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4822, AF_D_value / 4, WORD_LEN);
         if (rc < 0)
            goto error;
 
-        rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4824, AF_D_value, WORD_LEN);
+        rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4824, AF_D_value*3 /4 , WORD_LEN);
         if (rc < 0)
            goto error;
 
-        rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4838, AF_D_value * 4, WORD_LEN);        
+        rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4838, AF_D_value * 2, WORD_LEN);
         if (rc < 0)
            goto error;
         
@@ -2192,7 +2378,7 @@ int isx006_set_AF_Range(int af_mode)
         if (rc < 0)
            goto error;
 
-        rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4884, AF_C_value * 2, WORD_LEN);
+        rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4844, AF_C_value * 2, WORD_LEN);
         if (rc < 0)
            goto error;
 
@@ -2241,11 +2427,11 @@ int isx006_set_AF_Range(int af_mode)
         if (rc < 0)
            goto error;
         
-        rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4880, AF_A_value + (AF_C_value * 5), WORD_LEN); //AF_AREA_HIGH_TYPE3
+        rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4880, AF_A_value + (AF_C_value * 7), WORD_LEN); //AF_AREA_HIGH_TYPE3
         if (rc < 0)
            goto error;
 
-        rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4884, AF_C_value * 2, WORD_LEN);
+        rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4844, AF_C_value * 3, WORD_LEN);
         if (rc < 0)
            goto error;
 
@@ -2297,7 +2483,22 @@ error:
 }
 /* FIH-SW3-MM-UW-write OTP setting-00-*/
 /* FIH-SW3-MM-UW-set AF range-00-*/ 
+/* FIH-SW3-MM-UW-fix AF noise-00-*/
+/* FIH-SW3-MM-UW-flash tuning-06-*/
+/* FIH-SW3-MM-UW-fix Macro AF fail-00-*/
+/* FIH-SW3-MM-UW-read vendor id-00-*/
+/* FIH-SW3-MM-UW-2nd night mode AF fail-00-*/
 
+/* FIH-SW3-MM-UW-2nd night mode AF fail-00+*/
+/* FIH-SW3-MM-UW-read vendor id-00-01+*/
+/* FIH-SW3-MM-UW-modify touch AF-00+*/
+/* FIH-SW3-MM-UW-fix Macro AF fail-00+*/
+/* FIH-SW3-MM-UW-flash tuning-07+*/
+/* FIH-SW3-MM-UW-fast AF-01+*/
+/* FIH-SW3-MM-UW-fast AF-00+*/
+/* FIH-SW3-MM-UW-flash tuning-04+*/
+/*MTD-MM-SL-ModifyPicDetailInfo-01+{*/
+/* FIH-SW3-MM-UW-re-focus-00+*/
 /* FIH-SW3-MM-UW-flash tuning-00+*/
 /* FIH-SW3-MM-UW-fix AF not work-00+*/
 /* FIH-SW3-MM-UW-fix capture fail-00+*/
@@ -2313,8 +2514,10 @@ static long isx006_set_AF(int af_mode)
 {
     int rc = 0;
     int led_mode = 0;
-    int32_t AE_value = 0;
-    int32_t AE_target = 0x0000FD52 - 0x0000FFFF - 1;
+    bool Low_Light = false;
+    uint16_t AF_state = 0xFF;
+    uint16_t v_read = 0x0;
+    int i;
 
     if(af_mode != AF_MODE_POLLING)
         printk("isx006_set_AF(%d): ----------E\n", af_mode);
@@ -2323,49 +2526,29 @@ static long isx006_set_AF(int af_mode)
     case AF_MODE_NORMAL:
     case AF_MODE_AUTO:
         torch_enable = false;
-        LowLight = false;
-        /*get current environment AE value----------------------------------------------------*/
-        if (slave_add == isx006_client->addr)
-        {
-            rc = isx006_i2c_read_parallel(isx006_client->addr, 0x0288, &AESCL_AUTO, WORD_LEN);   
-        }else{
-            rc = isx006_i2c_read(isx006_client->addr, 0x0288, &AESCL_AUTO, WORD_LEN);
-        }  
-
-        if (slave_add == isx006_client->addr)
-        {
-            rc = isx006_i2c_read_parallel(isx006_client->addr, 0x0284, &ERRSCL_AUTO, WORD_LEN);   
-        }else{
-            rc = isx006_i2c_read(isx006_client->addr, 0x0284, &ERRSCL_AUTO, WORD_LEN);
-        }  
-        if(rc < 0) {
-            printk("isx006_set_AF: read AE value failed !\n");
-            goto error;
-        }
-
-        if( ERRSCL_AUTO >= 0x00008000 )
-            AE_value = (ERRSCL_AUTO - 0x0000FFFF -1);
-        else
-            AE_value = (ERRSCL_AUTO & 0x0000FFFF);
-
-        if(AE_value <= AE_target)
-        {
-            LowLight = true;
-            printk("isx006_set_AF: low light condition !\n");
-        }
-        /*--------------------------------------------------------------------------------*/
         
-        /*get current flash mode*/
+        /*get current environment AE valuel----------------------------*/
+        Low_Light = isx006_get_AE_value();
+
+        /*get current flash model-------------------------------------*/
         led_mode = msm_soc_get_led_mode();
         printk("isx006_set_AF: led_mode = %d !\n", led_mode);  
 
+        /*judge pre-flash or not--------------------------------------*/
         if( led_mode == LED_MODE_RED_EYE || led_mode == LED_MODE_AUTO)
         {  
-            if(LowLight)
+            if(Low_Light)
                 torch_enable = true;
         } 
-        
-        if( led_mode == LED_MODE_ON || torch_enable)
+
+         /*pre-flash-------------------------------------------------*/
+        if( led_mode == LED_MODE_ON)
+        {
+                rc = msm_soc_torch_trigger();
+                if (rc < 0)
+                    printk("isx006_set_AF: msm_soc_torch_trigger() failed !\n");
+        }
+        else if( torch_enable)
         {
                 printk("isx006_set_AF: flash enable!\n");
                 rc = msm_soc_torch_trigger();
@@ -2373,25 +2556,50 @@ static long isx006_set_AF(int af_mode)
                     printk("isx006_set_AF: msm_soc_torch_trigger() failed !\n");
                 
                 /* Set LED & AE/AWB Control----------------------------*/
-                rc = isx006_i2c_write_parallel(isx006_client->addr, 0x0069, 0x0D, BYTE_LEN);
-                if (rc < 0) {
-                    pr_err("isx006_set_AF: saddr(0x%x): Write REG(0x%x) failed !\n",isx006_client->addr, 0x0069);
-                }
+                rc = isx006_PreFlash_setting();
+                if (rc < 0)
+                    printk("isx006_set_AF: isx006_PreFlash_setting failed !\n");
 
-                rc = isx006_i2c_write_parallel(isx006_client->addr, 0x02C4, 0x0010, WORD_LEN);
-                if (rc < 0) {
-                    pr_err("isx006_set_AF: saddr(0x%x): Write REG(0x%x) failed !\n",isx006_client->addr, 0x02C4);
-                }
+        }
+        if(AF_full_range)
+            rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4876, AF_A_value, WORD_LEN);//AF_AREA_LOW_TYPE1
 
-                rc = isx006_i2c_write_parallel(isx006_client->addr, 0x027D, 0x05, BYTE_LEN);
-                if (rc < 0) {
-                    pr_err("isx006_set_AF: saddr(0x%x): Write REG(0x%x) failed !\n",isx006_client->addr, 0x027D);
-                }
+        /*check CAF state*/
+        rc = isx006_i2c_read_parallel(isx006_client->addr, 0x6D76, &AF_state, BYTE_LEN);
+        if (rc < 0) {
+            pr_err("isx006_set_AF: isx006_i2c_read_parallel failed, REG(0x%x) !\n", 0x6D76);
+            goto error;
         }
 
-        rc = isx006_set_monitor_af_mode(MONI_AF_SAF, "MONI_AF_SAF");
-        if(rc < 0)
-            goto error;
+        if (AF_state == 15 || AF_state == 12) //CAF_LOCK
+        {
+            rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4887, 0x01, BYTE_LEN);
+            AF_type = 1; //fine search
+        }
+        else
+        {
+            rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4887, 0x02, BYTE_LEN);
+            AF_type = 0; //full search
+        }
+
+        isx006_i2c_read_parallel(isx006_client->addr, 0x002E, &v_read, BYTE_LEN);
+        if(AF_skip)
+        {
+            printk("isx006_set_AF: did touch AF before, skip AF here\n");
+        }
+        else if(v_read == 0)
+        {
+            printk("isx006_set_AF: restart AF \n");
+            rc = isx006_i2c_write_parallel(isx006_client->addr, 0x0015, 0x01, BYTE_LEN);
+            if(rc < 0)
+                goto error;
+        }else
+       {
+            rc = isx006_set_monitor_af_mode(MONI_AF_SAF, "MONI_AF_SAF");
+
+            if(rc < 0)
+                goto error;
+       }
 
         break;
 
@@ -2400,21 +2608,21 @@ static long isx006_set_AF(int af_mode)
         rc = isx006_set_AF_Range(af_mode);        
         if(rc < 0)
             goto error;
-        
-        /*rc = isx006_set_monitor_af_mode(MONI_AF_SAF, "MONI_AF_SAF");
-        if(rc < 0)
-            goto error;
-
-        rc = isx006_check_AF(isx006_client->addr, "check AF status");
-        if (rc < 0) {
-            pr_err("isx006_set_AF: isx006_check_AF(check AF status) failed !\n");
-        }*/
         break;
 
-    case AF_MODE_CAF:      
-        rc = isx006_set_monitor_af_mode(MONI_AF_CAF, "MONI_AF_CAF");
-        if(rc < 0)
-            goto error;
+    case AF_MODE_CAF:
+        if(current_af_mode == AF_MODE_GET_STATE)
+        {
+            f_CAF = true;
+        }
+        else
+        {
+            if(vendor_id) //SEMCO
+                rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4876, AF_A_value + 30, WORD_LEN);//AF_AREA_LOW_TYPE1
+            rc = isx006_set_monitor_af_mode(MONI_AF_CAF, "MONI_AF_CAF");
+            if(rc < 0)
+                goto error;
+        }
         break;
 
     case AF_MODE_OFF:
@@ -2438,8 +2646,27 @@ static long isx006_set_AF(int af_mode)
     case AF_MODE_GET_STATE:
         rc = isx006_get_AF_state(isx006_client->addr, "check AF result");
         if(rc < 0)
-            goto error;
-   
+        {
+            if(!AF_type)//full search
+            {
+                goto error;
+            }
+            else
+            {
+                AF_type = 0;
+                printk("isx006_set_AF: fine search fail !!\n");
+                rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4887, 0x02, BYTE_LEN);
+                rc = isx006_i2c_write_parallel(isx006_client->addr, 0x0015, 0x01, BYTE_LEN);
+                for(i = 0; i < 150; i++)
+                {
+                    rc = isx006_check_AF(isx006_client->addr, "check AF polling status");
+                    if(!rc)
+                        break;
+                }
+                rc = isx006_get_AF_state(isx006_client->addr, "check AF result");
+            }
+        }
+        AF_skip = false;
         break;
 
     default:
@@ -2461,6 +2688,12 @@ error:
 /*MM-UW-fix auto flash fail in DP 00-*/
 /*MM-UW-fix high AF power-00-*/
 /* FIH-SW3-MM-UW-fix capture fail-00-*/
+/* FIH-SW3-MM-UW-re-focus-00-*/
+/* FIH-SW3-MM-UW-fast AF-00-*/
+/* FIH-SW3-MM-UW-fast AF-01-*/
+/* FIH-SW3-MM-UW-fix Macro AF fail-00-*/
+/* FIH-SW3-MM-UW-modify touch AF-00-*/
+/* FIH-SW3-MM-UW-2nd night mode AF fail-00-*/
 
 /* FIH-SW3-MM-UW-add reduce_red_eye-00-*/
 /*MM-UW-add auto flash 00-*/
@@ -2468,6 +2701,9 @@ error:
 /* FIH-SW3-MM-UW-fix night capture fail-00-*/
 /* FIH-SW3-MM-UW-fix AF not work-00-*/
 /* FIH-SW3-MM-UW-flash tuning-00-*/
+/*MTD-MM-SL-ModifyPicDetailInfo-01*}*/
+/* FIH-SW3-MM-UW-flash tuning-07-*/
+/* FIH-SW3-MM-UW-read vendor id-01-*/
 
 /* FIH-SW3-MM-SL-SetFPSForRecordMMS-00*{ */
 /* FIH-SW3-MM-URI-Set FPS-00+ */
@@ -2650,6 +2886,7 @@ static long isx006_set_wb(int wb)
 error:
     return rc;
 }
+
 #endif
 
 /*MM-UW-set metering 00+*/
@@ -2847,19 +3084,6 @@ static int isx006_reg_init_task(void *arg)
         goto error;
     }
 
-    printk("isx006_reg_init_task: Start OTP read/save value. \n");
-    /*MM-UW-fix DP device green preview-00+*/
-    /* OTP read/save value */    
-    if(slave_add == isx006_client->addr)
-    {
-        rc = isx006_OTP_setting();
-        if (rc < 0) {
-            pr_err("isx006_reg_init_task: OTP read/save value failed !\n");
-            goto error;
-        }
-    }
-    /*MM-UW-fix DP device green preview-00-*/
-
     /* Change slave address from 0x1A to 0x3C */
     if (slave_add != isx006_client->addr)
     {   
@@ -2898,6 +3122,7 @@ error:
 /* FIH-SW3-MM-UW-set AF range-00-*/ 
 //FIH-SW-MM-MC-ReduceMainCameraLaunchTime-00+}
 
+/* FIH-SW3-MM-UW-flash tuning-06+*/
 /* FIH-SW3-MM-UW-flash tuning-02+*/
 /* FIH-SW3-MM-UW-flash tuning-01+*/
 /* FIH-SW3-MM-UW-flash tuning-00+*/
@@ -2907,7 +3132,6 @@ error:
 static int32_t isx006_sensor_setting(int update_type, int rt)
 {
     int32_t rc = 0;
-    int led_mode = 0;
     
     struct msm_camera_csi_params isx006_csi_params;
 
@@ -2936,29 +3160,16 @@ static int32_t isx006_sensor_setting(int update_type, int rt)
         {
             printk("isx006_sensor_setting: case UPDATE_PERIODIC <RES_PREVIEW + CSI(1)>\n");
 
-            /*get current flash mode*/
-            led_mode = msm_soc_get_led_mode();
-            printk("isx006_sensor_setting: led_mode = %d !\n", led_mode);  
-            
-            if( led_mode == LED_MODE_RED_EYE || led_mode == LED_MODE_AUTO)
-            {  
-                if(LowLight)
-                {
-                    rc = isx006_i2c_write_parallel(isx006_client->addr, 0x0069, 0x00, BYTE_LEN);
-                    rc = isx006_i2c_write_parallel(isx006_client->addr, 0x02C4, 0x0000, WORD_LEN);
-                    rc = isx006_i2c_write_parallel(isx006_client->addr, 0x027D, 0x00, BYTE_LEN);
-                    rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4066, 0x0A, BYTE_LEN);
-                    rc = isx006_i2c_write_parallel(isx006_client->addr, 0x402F, 0x0F, BYTE_LEN);
-                    rc = isx006_i2c_write_parallel(isx006_client->addr, 0x404C, 0x20, BYTE_LEN);
-                    rc = isx006_i2c_write_parallel(isx006_client->addr, 0x400B, 0x1A, BYTE_LEN);
-                    if (rc < 0) {
-                        pr_err("isx006_set_AF: Restore normal settings fail !\n");
-                    }
-                        
-                }
+            rc = isx006_i2c_write_parallel(isx006_client->addr, 0x0069, 0x00, BYTE_LEN);
+            rc = isx006_i2c_write_parallel(isx006_client->addr, 0x02C4, 0x0000, WORD_LEN);
+            rc = isx006_i2c_write_parallel(isx006_client->addr, 0x027D, 0x00, BYTE_LEN);
+            rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4066, 0x0A, BYTE_LEN);
+            rc = isx006_i2c_write_parallel(isx006_client->addr, 0x402F, 0x0F, BYTE_LEN);
+            rc = isx006_i2c_write_parallel(isx006_client->addr, 0x404C, 0x20, BYTE_LEN);
+            rc = isx006_i2c_write_parallel(isx006_client->addr, 0x400B, 0x1A, BYTE_LEN);
+            if (rc < 0) {
+                pr_err("isx006_set_AF: Restore normal settings fail !\n");
             }
-            flash_enable = false;
-            torch_enable = false;
             
             /* Change mode from Capture to monitor----------------------------*/
             rc = isx006_set_camera_mode(MONITOR_MODE, "MONITOR_MODE");
@@ -3017,7 +3228,7 @@ static int32_t isx006_sensor_setting(int update_type, int rt)
             printk("isx006_sensor_setting: case UPDATE_PERIODIC <RES_CAPTURE>\n");
 
             if(isx006_scene == SCENE_NIGHT)
-                cam_msleep(400);//Div2-SW6-MM-MC-EnhanceStabilityForMainCamera-00*
+                cam_msleep(300);//Div2-SW6-MM-MC-EnhanceStabilityForMainCamera-00*
             else
                 cam_msleep(50);  
             
@@ -3036,8 +3247,7 @@ static int32_t isx006_sensor_setting(int update_type, int rt)
             //cam_msleep(100);//cam_msleep(50);//Waitting for invalid frames.
             //Div2-SW6-MM-MC-EnhanceStabilityForMainCamera-00+{
             if(isx006_scene == SCENE_NIGHT)
-                //cam_msleep(333);
-                cam_msleep(400);
+                cam_msleep(300);
             else
                 cam_msleep(50); 
             //Div2-SW6-MM-MC-EnhanceStabilityForMainCamera-00+}
@@ -3057,6 +3267,7 @@ static int32_t isx006_sensor_setting(int update_type, int rt)
 /* FIH-SW3-MM-UW-flash tuning-00-*/
 /* FIH-SW3-MM-UW-flash tuning-01-*/
 /* FIH-SW3-MM-UW-flash tuning-02-*/
+/* FIH-SW3-MM-UW-flash tuning-06-*/
 
 static int32_t isx006_video_config(int mode)
 {
@@ -3071,9 +3282,19 @@ static int32_t isx006_video_config(int mode)
     else
         rt = RES_CAPTURE;
 
+    if(f_CAF)
+    {
+        if(vendor_id) //SEMCO
+            rc = isx006_i2c_write_parallel(isx006_client->addr, 0x4876, AF_A_value + 30, WORD_LEN);//AF_AREA_LOW_TYPE1
+        rc = isx006_set_monitor_af_mode(MONI_AF_CAF, "MONI_AF_CAF");
+        if(rc < 0)
+             printk("isx006_video_config: switch AF mode to CAF fail !!\n");
+    }
     rc = isx006_sensor_setting(UPDATE_PERIODIC, rt);
     if(rc < 0)
         goto error;
+
+    f_CAF = false;
 
     isx006_ctrl->curr_res = isx006_ctrl->prev_res;
     isx006_ctrl->sensormode = mode;
@@ -3085,7 +3306,12 @@ error:
     return rc;
 }
 
+/* FIH-SW3-MM-UW-fix Macro AF fail-00+*/
+/* FIH-SW3-MM-UW-flash tuning-07+*/
+/* FIH-SW3-MM-UW-flash tuning-06+*/
+/* FIH-SW3-MM-UW-flash tuning-04+*/
 /* FIH-SW3-MM-UW-flash tuning-02+*/
+/*MTD-MM-SL-ModifyPicDetailInfo-01*{*/
 /* FIH-SW3-MM-UW-flash tuning-00+*/
 /*MM-UW-fix auto flash fail in DP 00+*/
 /*MM-UW-add auto flash 03+*/
@@ -3097,45 +3323,138 @@ static int32_t isx006_snapshot_config(int mode)
     int32_t rc = 0;
     int rt;
     int led_mode = 0;
+    uint16_t v_read = 0x0;
+    int32_t Diff = 0;
+    uint16_t Diff_index = 0;
+    int i = 0;
     uint16_t read_value = 0;
-    int32_t AE_value = 0;
-    int32_t AE_target = 0x0000FD52 - 0x0000FFFF - 1;
-       
+
     printk("isx006_snapshot_config---------------E\n");
-    led_mode = msm_soc_get_led_mode();
 
     /*get current flash mode*/
-    if(torch_enable)
+    led_mode = msm_soc_get_led_mode();
+
+    /*judge pre-flash or not--------------------------------------*/
+    if(led_mode == LED_MODE_ON)
     {
-        printk("isx006_snapshot_config--torch & flash enable\n");
-        flash_enable = true;
-    }
-    else
-    {
-        if(LowLight)
+        printk("isx006_snapshot_config--fill flash\n");
+        if(isx006_get_AE_value())
         {
-            /*get current environment AE value*/
-            if (slave_add == isx006_client->addr)
+            printk("isx006_snapshot_config--fill flash & low light\n");
+            flash_enable = true;
+            /* Set LED & AE/AWB Control-----------------*/
+            rc = isx006_PreFlash_setting();
+            if (rc < 0)
+                printk("isx006_snapshot_config: isx006_PreFlash_setting failed !\n");
+        }
+    }
+    else if( led_mode == LED_MODE_RED_EYE || led_mode == LED_MODE_AUTO )
+    {
+        if(torch_enable)
+        {
+            printk("isx006_snapshot_config--torch & flash enable\n");
+            flash_enable = true;
+        }
+        else
+        {
+            printk("isx006_snapshot_config--flash enable\n");
+            if(isx006_get_AE_value())
             {
-                rc = isx006_i2c_read_parallel(isx006_client->addr, 0x0284, &read_value, WORD_LEN);   
-            }else{
-                rc = isx006_i2c_read(isx006_client->addr, 0x0284, &read_value, WORD_LEN);
+                printk("isx006_snapshot_config--flash enable & low light\n");
+                flash_enable = true;
+                /* Set LED & AE/AWB Control-----------------*/
+                rc = isx006_PreFlash_setting();
+                if (rc < 0)
+                    printk("isx006_snapshot_config: isx006_PreFlash_setting failed !\n");
             }
-            if(rc < 0) {
-                printk("isx006_snapshot_config: read AE value failed !\n");
+        }
+    }
+
+    /*calulate exposure gain for flash------------------------------*/
+    if(flash_enable)
+    {
+        rc = msm_soc_torch_trigger();
+        cam_msleep(200);
+
+        /* 02.Check HALF_MOVE_STS ----------------*/
+
+        /* Make sure operation mode is changed */
+        printk("isx006_snapshot_config: check HALF_MOVE_STS\n");
+        for (i = 0; i < ISX006_AE_RETRY_COUNT; i++)
+        {
+            rc = isx006_i2c_read_parallel(isx006_client->addr, 0x6C00, &v_read, BYTE_LEN);
+            if (rc < 0) {
+                pr_err("isx006_snapshot_config: isx006_i2c_read_parallel failed, REG(0x%x) !\n", 0x6C00);
                 goto error;
             }
-
-            printk("isx006_snapshot_config: AE read_value = 0x%x !\n", read_value);
-            if( read_value >= 0x00008000 )
-                  AE_value = (read_value - 0x0000FFFF -1);
-            else
-                  AE_value = (read_value & 0x0000FFFF);
-            printk("isx006_snapshot_config: AE read = %d , AE_target = %d!\n", AE_value, AE_target);
-
-            if(AE_value <= AE_target)
-                flash_enable = true;
+            if (v_read == 0)
+                break;
+            cam_msleep(10);
         }
+
+        if (i >= ISX006_AE_RETRY_COUNT)
+        {
+            pr_err("isx006_snapshot_config: check HALF_MOVE_STS fail !\n");
+        }
+
+        /*Get AESCL_NOW--------------------------*/
+        if (slave_add == isx006_client->addr)
+        {
+            rc = isx006_i2c_read_parallel(isx006_client->addr, 0x028A, &read_value, WORD_LEN);
+        }else{
+            rc = isx006_i2c_read(isx006_client->addr, 0x028A, &read_value, WORD_LEN);
+        }
+        AESCL_NOW = read_value;
+
+
+        /*Get ERRSCL_NOW-------------------------*/
+        if (slave_add == isx006_client->addr)
+        {
+            rc = isx006_i2c_read_parallel(isx006_client->addr, 0x0286, &read_value, WORD_LEN);
+        }else{
+            rc = isx006_i2c_read(isx006_client->addr, 0x0286, &read_value, WORD_LEN);
+        }
+        if(rc < 0) {
+            printk("isx006_get_AE_value: read AE value failed !\n");
+        }
+
+        if( read_value >= 0x00008000 )
+            ERRSCL_NOW = (read_value - 0x0000FFFF -1);
+        else
+            ERRSCL_NOW = (read_value & 0x0000FFFF);
+
+        /*----------------------------------------*/
+
+        printk("isx006_snapshot_config: AESCL_AUTO = %d, ERRSCL_AUTO = %d\n", AESCL_AUTO, ERRSCL_AUTO);
+        printk("isx006_snapshot_config: AESCL_NOW = %d, ERRSCL_NOW = %d\n", AESCL_NOW, ERRSCL_NOW);
+
+        Diff = (AESCL_NOW + ERRSCL_NOW) -(AESCL_AUTO + ERRSCL_AUTO);
+        //printk("isx006_snapshot_config+: Diff = %d \n", Diff);
+        /* ----------------------------------------*/
+        if(Diff < 0)
+            Diff_index = 0;
+        else if((Diff - (Diff/10) * 10) < 5)
+            Diff_index = (Diff/10);
+        else
+            Diff_index = (Diff/10) + 1;
+
+        printk("isx006_snapshot_config: Diff_index = %d \n", Diff_index);
+
+        if(Diff_index >= offset_size -1)
+        {
+            Diff_index = offset_size - 1;
+        }
+
+        if(led_mode == LED_MODE_ON)
+        {
+            if(isx006_get_AE_value())
+                rc = isx006_i2c_write_parallel(isx006_client->addr, 0x0282, (x_8[Diff_index] - ERRSCL_NOW) + (0x0000FFFF + 1), WORD_LEN);
+        }
+        else
+       {
+            rc = isx006_i2c_write_parallel(isx006_client->addr, 0x0282, (x_8[Diff_index] - ERRSCL_NOW) + (0x0000FFFF + 1), WORD_LEN);
+        }
+
     }
     
     /*change sensor resolution if needed */
@@ -3197,6 +3516,8 @@ static int32_t isx006_snapshot_config(int mode)
     }
     //SW2D2-MM-MC-Camera-BringUpLm3561ForFlashLed-00+}
 
+    flash_enable = false;
+    torch_enable = false;
     printk("isx006_snapshot_config---------------X\n");
     return rc;
     
@@ -3210,7 +3531,12 @@ error:
 /*MM-UW-add auto flash 03-*/
 /*MM-UW-fix auto flash fail in DP 00-*/
 /* FIH-SW3-MM-UW-flash tuning-00-*/
+/*MTD-MM-SL-ModifyPicDetailInfo-01*}*/
 /* FIH-SW3-MM-UW-flash tuning-02-*/
+/* FIH-SW3-MM-UW-flash tuning-04-*/
+/* FIH-SW3-MM-UW-flash tuning-06-*/
+/* FIH-SW3-MM-UW-flash tuning-07-*/
+/* FIH-SW3-MM-UW-fix Macro AF fail-00-*/
 
 static int32_t isx006_raw_snapshot_config(int mode)
 {
@@ -3262,14 +3588,7 @@ static int32_t isx006_set_sensor_mode(int mode,
             return rc;
         }        
         //FIH-SW-MM-MC-ImplementSensorReSetForMt9v115-00+}
-        //Div2-SW6-MM-MC-EnhanceStabilityForMainCamera-00+{
-        if (pdev_isx006 != NULL)
-        {
-            msm_camio_disable(pdev_isx006);
-            cam_msleep(20);//Wait camio disable done.
-            printk("isx006_set_sensor_mode: msm_camio_disable() \n");
-        }
-        //Div2-SW6-MM-MC-EnhanceStabilityForMainCamera-00+}
+
 
         //03. Power off.
         rc = isx006_power_off();
@@ -3279,6 +3598,7 @@ static int32_t isx006_set_sensor_mode(int mode,
         }
         //Div2-SW6-MM-MC-EnhanceStabilityForMainCamera-00*{
         cam_msleep(200);//Wait power off done.
+
         //Div2-SW6-MM-MC-EnhanceStabilityForMainCamera-00+*}
 
         //04. Power on.
@@ -3294,15 +3614,6 @@ static int32_t isx006_set_sensor_mode(int mode,
             printk("isx006_set_sensor_mode: Create task thread for reset failed !\n");
             return rc;
         }
-
-        //Div2-SW6-MM-MC-EnhanceStabilityForMainCamera-00+{
-        if (pdev_isx006 != NULL)
-        {
-            msm_camio_enable(pdev_isx006);
-            cam_msleep(20);//Wait camio disable done.
-            printk("isx006_set_sensor_mode: msm_camio_enable() \n");
-        }
-        //Div2-SW6-MM-MC-EnhanceStabilityForMainCamera-00+}
 
         //06. Config CSI and wake up task thread.
         rc = isx006_sensor_setting(UPDATE_PERIODIC, RES_PREVIEW);
@@ -3443,10 +3754,14 @@ init_probe_done:
 }
 /* FIH-SW3-MM-UW-write OTP setting-00-*/
 
+/* FIH-SW3-MM-UW-read vendor id-02+*/
+/* FIH-SW3-MM-UW-read vendor id-01+*/
+/* FIH-SW3-MM-UW-read vendor id-00+*/
 int isx006_sensor_open_init(const struct msm_camera_sensor_info *data)
 {
     int32_t rc = 0;
     uint16_t chipid = 0xFFFF;//FIH-SW-MM-MC-ImplementSensorReSetForIsx006-02+
+    int count = 0;//FIH-SW-MM-MC-ImplementSensorReSetForIsx006-04+
 
     printk("Calling isx006_sensor_open_init\n");
 
@@ -3491,10 +3806,23 @@ int isx006_sensor_open_init(const struct msm_camera_sensor_info *data)
     //FIH-SW-MM-MC-ImplementSensorReSetForMt9v115-00+{
     //FIH-SW-MM-MC-ImplementSensorReSetForIsx006-02+{
     //Read chip ID to check that I2C bus is normal.
-    if (STARTUP == 0)
-        rc = isx006_i2c_read_parallel(slave_add, ISX006_CID_REG, &chipid, WORD_LEN);
-    else
-        rc = isx006_i2c_read_parallel(isx006_client->addr, ISX006_CID_REG, &chipid, WORD_LEN);
+    //FIH-SW-MM-MC-ImplementSensorReSetForIsx006-04+{
+    #define ISX006_ID_RETRY_COUNT 2 //FIH-SW-MM-MC-EnableHWStandby-00+
+    do
+    {
+        if (STARTUP == 0)
+            rc = isx006_i2c_read_parallel(slave_add, ISX006_CID_REG, &chipid, WORD_LEN);
+        else
+            rc = isx006_i2c_read_parallel(isx006_client->addr, ISX006_CID_REG, &chipid, WORD_LEN);
+
+        if (rc < 0)
+        {
+            cam_msleep(50);//Wait for I2C stable.
+            printk ("isx006_sensor_open_init: Waiting for I2C bus stable...(50ms), count = %d .\n", count);
+        }
+        count++;
+    } while( (rc < 0) && (count < ISX006_ID_RETRY_COUNT));
+    //FIH-SW-MM-MC-ImplementSensorReSetForIsx006-04+}
     //FIH-SW-MM-MC-ImplementSensorReSetForMt9v115-00+}
     if (rc < 0)
     {
@@ -3511,6 +3839,7 @@ int isx006_sensor_open_init(const struct msm_camera_sensor_info *data)
             return rc;
         }  
         //FIH-SW-MM-MC-ImplementSensorReSetForMt9v115-00+}
+        cam_msleep(10);//FIH-SW-MM-MC-ImplementSensorReSetForIsx006-04+
 
         //03. Power off.
         rc = isx006_power_off();
@@ -3518,7 +3847,7 @@ int isx006_sensor_open_init(const struct msm_camera_sensor_info *data)
             printk("isx006_sensor_open_init: isx006_power_off for reset failed !\n");
             return rc;
         }
-        cam_msleep(50);//Wait power off done.
+        cam_msleep(100);//Wait power off done. //FIH-SW-MM-MC-ImplementSensorReSetForIsx006-04*
 
         //04. Power on.
         rc = isx006_power_on(isx006_info);
@@ -3534,6 +3863,21 @@ int isx006_sensor_open_init(const struct msm_camera_sensor_info *data)
 
     if(STARTUP == 0)
     {
+        rc = isx006_i2c_write_parallel(slave_add, 0x3206, 0x00, BYTE_LEN);
+        if (rc < 0) {
+            pr_err("isx006_reg_init_task: change to Little I2C mode fail!\n");
+        }
+
+        /* OTP read/save value */
+        printk("isx006_reg_init_task: Start OTP read/save value. \n");
+        if(slave_add == isx006_client->addr)
+        {
+            rc = isx006_OTP_get();
+            if (rc < 0) {
+                pr_err("isx006_reg_init_task: OTP read/save value failed !\n");
+            }
+        }
+
         printk("isx006_sensor_open_init: init settings\n");
         if (isx006_ctrl->prev_res == QTR_SIZE){
             rc = isx006_sensor_setting(REG_INIT, RES_PREVIEW);
@@ -3544,6 +3888,9 @@ int isx006_sensor_open_init(const struct msm_camera_sensor_info *data)
         }
     }
     isx006_ctrl->fps = 30 * Q8;
+
+    if(!vendor_id) //KMOT
+        rc = isx006_i2c_write_table_parallel(slave_add, isx006_regs.reg_preload3_reload, isx006_regs.reg_preload3_reload_size);
     
     if (rc < 0)
         goto init_fail;
@@ -3558,6 +3905,9 @@ init_done:
     printk("isx006_sensor_open_init: init_done\n");
     return rc;
 }
+/* FIH-SW3-MM-UW-read vendor id-00-*/
+/* FIH-SW3-MM-UW-read vendor id-01-*/
+/* FIH-SW3-MM-UW-read vendor id-02-*/
 
 static int isx006_init_client(struct i2c_client *client)
 {
@@ -3793,7 +4143,27 @@ int isx006_sensor_config(void __user *argp)
         break;
     //FIH-SW-MM-MC-ImplementTouchFocusAndCAF-00+}
     /* FIH-SW3-MM-UW-add touch AF-00-*/
-    
+	/*MTD-MM-SL-ModifyPicDetailInfo-01+{*/
+	case CFG_GET_FLASH_STATE:
+        if(torch_enable){
+           printk("isx006_snapshot_config--torch & flash enable\n");
+           is_flash_enable = 1;
+		}else{
+           if(isx006_get_AE_value())
+              is_flash_enable = 1;
+        }
+		cdata.cfg.flash_state = is_flash_enable;
+		printk("isx006_sensor_config: cdata.cfg.flash_state = %d\n", cdata.cfg.flash_state);
+
+		if (copy_to_user((void *)argp,
+                    &cdata,
+                sizeof(struct sensor_cfg_data)))
+            rc = -EFAULT;
+
+		is_flash_enable = 0;
+		break;
+    /*MTD-MM-SL-ModifyPicDetailInfo-01+}*/
+
     default:
         rc = -EFAULT;
         break;
@@ -3803,6 +4173,8 @@ int isx006_sensor_config(void __user *argp)
     return rc;
 }
 
+/* FIH-SW3-MM-UW-fix cts testFocusDistances fail-00+*/
+/* FIH-SW3-MM-UW-enhance stability-00+*/
 /* FIH-SW3-MM-UW-fix AF not work-00+*/
 /* FIH-SW3-MM-UW-AF power-00+*/
 /* FIH-SW3-MM-UW-performance tune-00+*/
@@ -3840,11 +4212,23 @@ static int isx006_sensor_release(void)
     reg_init_thread = NULL;
     //FIH-SW-MM-MC-ReduceMainCameraLaunchTime-00+}
 
-    isx006_power_off();
+    rc = isx006_power_off();
+    if(rc < 0)
+    {
+        printk("isx006_sensor_release: enter standby fail.\n");
+        STARTUP = 0;
+        bMainCameraIsReset = true;
+        rc = isx006_power_off();
+        if(rc < 0)
+        {
+            printk("isx006_sensor_release: Re-PowerOff fail.\n");
+        }
+    }
  
     kfree(isx006_ctrl);
     isx006_ctrl = NULL;
     CSI_CONFIG = false;
+    AF_skip = false;
  
     printk("isx006_sensor_release: Completed.\n");
     mutex_unlock(&isx006_mut);
@@ -3854,6 +4238,8 @@ static int isx006_sensor_release(void)
 /* FIH-SW3-MM-UW-performance tune-00-*/
 /* FIH-SW3-MM-UW-AF power-00-*/
 /* FIH-SW3-MM-UW-fix AF not work-00-*/
+/* FIH-SW3-MM-UW-enhance stability-00-*/
+/* FIH-SW3-MM-UW-fix cts testFocusDistances fail-00-*/
 
 static int isx006_sensor_probe(const struct msm_camera_sensor_info *info,
         struct msm_sensor_ctrl *s)

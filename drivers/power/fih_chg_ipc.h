@@ -24,7 +24,7 @@ typedef enum
 typedef enum
 {
     CHG_IPC_BATTERY_TYPE_SONY,
-    CHG_IPC_BATTERY_TYPE_ALIEN,  
+    CHG_IPC_BATTERY_TYPE_ALIEN,
 }CHG_IPC_BATTERY_TYPE;
 
 #ifdef IMAGE_MODEM_PROC
@@ -52,4 +52,3 @@ typedef struct  {
    int          parameters[CHG_IPC_NUM_PARAMETERS];
 } chg_ipc_smem;
 /* FIH-SW3-KERNEL-VH-CHARGING-15*] */
-

@@ -76,8 +76,8 @@ extern unsigned int fih_get_tcxo_sd_during_display_on(void);
 #endif
 /* FIH-SW-KERNEL-HC-TCXO_SD_DURING_DISPLAY_ON-01+] */
 /* Kernel-JC-suspendsetfreq-00+[ */
-#define CONFIG_SET_MAX_CPUFREQ_BEFORE_SUSPEND	
-#define CPUFREQ_BEFORE_SUSPEND 600000
+/*#define CONFIG_SET_MAX_CPUFREQ_BEFORE_SUSPEND*//*Kernel-SC-cpuFreq-none-sync-01-*/
+/*#define CPUFREQ_BEFORE_SUSPEND 600000*/ /*Kernel-SC-suspendsetfreq-00-*/
 /* Kernel-JC-suspendsetfreq-00+] */
 /******************************************************************************
  * Debug Definitions
@@ -667,11 +667,22 @@ void msm_pm_set_max_sleep_time(int64_t max_sleep_time_ns)
 		max_sleep_time_ns, msm_pm_max_sleep_time);
 	local_irq_restore(flags);
 /*Kernel-JC-suspendsetfreq-00+[ */
-#ifdef CONFIG_SET_MAX_CPUFREQ_BEFORE_SUSPEND
-	printk(KERN_INFO "%s(): ready to set %d clock rate\n", __func__ , CPUFREQ_BEFORE_SUSPEND);
-	if (acpuclk_set_rate(smp_processor_id(), CPUFREQ_BEFORE_SUSPEND, SETRATE_CPUFREQ) < 0)
-		printk(KERN_ERR "%s(): failed to set %d clock rate\n", __func__, CPUFREQ_BEFORE_SUSPEND);
-#endif
+/*Kernel-SC-cpuFreq-none-sync-01-[*/
+/*#ifdef CONFIG_SET_MAX_CPUFREQ_BEFORE_SUSPEND
+	{
+		int max_freq = 800000;
+
+		if (cpu_is_msm7x27aa()) {
+			max_freq = 1008000;
+		}
+		printk(KERN_INFO "%s(): ready to set %d clock rate\n", __func__ , max_freq);
+		if (acpuclk_set_rate(smp_processor_id(), max_freq, SETRATE_CPUFREQ) < 0) {
+			printk(KERN_ERR "%s(): failed to set %d clock rate\n", __func__, max_freq);
+		}
+	}
+
+#endif*/
+/*Kernel-SC-cpuFreq-none-sync-01-]*/
 /* Kernel-JC-suspendsetfreq-00+] */
 }
 EXPORT_SYMBOL(msm_pm_set_max_sleep_time);

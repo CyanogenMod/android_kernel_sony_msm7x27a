@@ -267,7 +267,8 @@ enum hrtimer_restart mdp_dma2_vsync_hrtimer_handler(struct hrtimer *ht)
 
 	mfd = container_of(ht, struct msm_fb_data_type, dma_hrtimer);
 
-	mdp_pipe_kickoff(MDP_DMA2_TERM, mfd);
+/* FIH-SW-MM-VH-DISPLAY-41* */
+	mdp_pipe_kickoff(MDP_DMA2_TERM, mfd, NULL);
 
 	if (msm_fb_debug_enabled) {
 		ktime_t t;
@@ -324,7 +325,11 @@ void	mdp3_dsi_cmd_dma_busy_wait(struct msm_fb_data_type *mfd)
 			printk(KERN_ALERT "[DISPLAY] %s: Wait DMA finish timeout!\n", __func__);
 /* FIH-SW-MM-VH-DISPLAY-27+ */
 			mdp_dump();
-
+/* FIH-SW-MM-VH-DISPLAY-48+[ */
+			mfd->dma->busy= FALSE;
+			mdp_pipe_ctrl(MDP_DMA2_BLOCK, MDP_BLOCK_POWER_OFF, TRUE);
+			complete(&mfd->dma->comp);
+/* FIH-SW-MM-VH-DISPLAY-48+] */
 		}
 /* FIH-SW3-MM-NC-LCM-05 -]- */
 	}
@@ -355,7 +360,8 @@ static void mdp_dma_schedule(struct msm_fb_data_type *mfd, uint32 term)
 
 	if ((!mfd->ibuf.vsync_enable) || (!mfd->panel_info.lcd.vsync_enable)
 	    || (mfd->use_mdp_vsync)) {
-		mdp_pipe_kickoff(term, mfd);
+/* FIH-SW-MM-VH-DISPLAY-41* */
+		mdp_pipe_kickoff(term, mfd, NULL);
 		return;
 	}
 	/* SW vsync logic starts here */
@@ -434,7 +440,8 @@ static void mdp_dma_schedule(struct msm_fb_data_type *mfd, uint32 term)
 	mdp_last_dma2_update_height = mdp_curr_dma2_update_height;
 
 	if (usec_wait_time == 0) {
-		mdp_pipe_kickoff(term, mfd);
+/* FIH-SW-MM-VH-DISPLAY-41* */
+		mdp_pipe_kickoff(term, mfd, NULL);
 	} else {
 		ktime_t wait_time;
 
@@ -509,7 +516,11 @@ void mdp_dma2_update(struct msm_fb_data_type *mfd)
 /*		wait_for_completion_killable(&mfd->dma->comp); */
 		if (!wait_for_completion_killable_timeout(&mfd->dma->comp, 500)) {
 			printk(KERN_ALERT "[DISPLAY] %s: Wait DMA finish timeout!\n", __func__);
-/* FIH-SW-MM-VH-DISPLAY-27+ */
+/* FIH-SW-MM-VH-DISPLAY-48*[ */
+			mfd->dma->busy= FALSE;
+			mdp_pipe_ctrl(MDP_DMA2_BLOCK, MDP_BLOCK_POWER_OFF, TRUE);
+			complete(&mfd->dma->comp);
+/* FIH-SW-MM-VH-DISPLAY-48*] */
 			mdp_dump();
 		}
 /* FIH-SW3-MM-NC-LCM-05-]- */
