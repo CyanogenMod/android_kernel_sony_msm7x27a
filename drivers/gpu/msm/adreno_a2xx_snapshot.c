@@ -254,7 +254,8 @@ void *a2xx_snapshot(struct adreno_device *adreno_dev, void *snapshot,
 	unsigned int pmoverride;
 
 	/* Choose the register set to dump */
-
+	/* FIH-SW2-MM-KW-Useless_codes-00+{ */
+	#if 0
 	if (adreno_is_a20x(adreno_dev)) {
 		regs.regs = (unsigned int *) a200_registers;
 		regs.count = a200_registers_count;
@@ -262,6 +263,11 @@ void *a2xx_snapshot(struct adreno_device *adreno_dev, void *snapshot,
 		regs.regs = (unsigned int *) a220_registers;
 		regs.count = a220_registers_count;
 	}
+	#else
+		regs.regs = (unsigned int *) a200_registers;
+		regs.count = a200_registers_count;
+	#endif
+	/* FIH-SW2-MM-KW-Useless_codes-00-} */
 
 	/* Master set of (non debug) registers */
 	snapshot = kgsl_snapshot_add_section(device,

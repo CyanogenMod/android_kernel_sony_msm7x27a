@@ -19,4 +19,3 @@ typedef struct  {
    unsigned int msg_index;
    char         msg[ADC_LOG_BUFFER_RECORDS][ADC_LOG_BUFFER_SIZE];
 } adc_ipc_smem;
-

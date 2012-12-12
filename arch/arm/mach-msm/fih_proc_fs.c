@@ -4,9 +4,6 @@
 #include <linux/proc_fs.h>
 #include <linux/module.h>
 #include <linux/fih_hw_info.h>
-#ifndef CONFIG_FIH_FTM
-#include "Version_LINUX.h"
-#endif
 
 unsigned int get_boot_info(void);  /* MTD-BSP-VT-RECOVERY-00+ */
 
@@ -28,7 +25,7 @@ static int device_model_read_proc(char *page, char **start, off_t off,
 	int len;
 	int pi = fih_get_product_id();
 	char ver[24]={0} ;
-		
+
 	switch (pi){
 	case Project_GUA:
 		strncpy(ver, "GUA",3);
@@ -43,12 +40,12 @@ static int device_model_read_proc(char *page, char **start, off_t off,
 		strncpy(ver, "TAP",3);
 		ver[3]='\0';
 		break;
-		
+
     case Project_MES:
 		strncpy(ver, "MES",3);
 		ver[3]='\0';
 		break;
-		
+
 /* MTD-BSP-VT-HWID-01+[ */
     case Project_JLO:
 		strncpy(ver, "JLO",3);
@@ -64,8 +61,8 @@ static int device_model_read_proc(char *page, char **start, off_t off,
 
 	len = snprintf(page, count, "%s\n",
 		ver);  /* MTD-BSP-VT-PROC-00* */
-		
-	return proc_calc_metrics(page, start, off, count, eof, len);	
+
+	return proc_calc_metrics(page, start, off, count, eof, len);
 }
 
 static int baseband_read_proc(char *page, char **start, off_t off,
@@ -75,12 +72,12 @@ static int baseband_read_proc(char *page, char **start, off_t off,
 
 	int pp = fih_get_product_phase();
 	char ver[25]={0};
-	
+
 	switch (pp){
 	case Phase_EVB:
 		strncpy(ver, "EVB", 3);
 		ver[3]='\0';
-		break; 
+		break;
 	case Phase_DP:
 		strncpy(ver, "DP", 2);
 		ver[2]='\0';
@@ -88,7 +85,7 @@ static int baseband_read_proc(char *page, char **start, off_t off,
 	case Phase_SP:
 		strncpy(ver, "SP", 2);
 		ver[3]='\0';
-		break; 
+		break;
 	/* MTD-BSP-VT-HWID-02+[ */
 	case Phase_SP2:
 		strncpy(ver, "SP2", 3);
@@ -130,7 +127,7 @@ static int baseband_read_proc(char *page, char **start, off_t off,
 	case Phase_MP:
 		strncpy(ver, "MP", 2);
 		ver[2]='\0';
-		break; 
+		break;
 	default:
 		strncpy(ver, "Unkonwn Baseband version",24);
 		ver[24]='\0';
@@ -166,7 +163,7 @@ static int band_read_proc(char *page, char **start, off_t off,
       break;
     }
     len = snprintf(page, count, "%s\n",ver);  /* MTD-BSP-VT-PROC-00* */
-    
+
     return proc_calc_metrics(page, start, off, count, eof, len);
 }
 
@@ -176,7 +173,7 @@ static int siminfo_read_proc(char *page, char **start, off_t off,
 	int len;
 	int pi = fih_get_sim_id();
 	char ver[24]={0} ;
-		
+
 	switch (pi){
 	case SINGLE_SIM:
 		strncpy( ver, "SINGLE SIM", 10);
@@ -193,8 +190,8 @@ static int siminfo_read_proc(char *page, char **start, off_t off,
 	}
 
 	len = snprintf(page, count, "%s\n", ver);  /* MTD-BSP-VT-PROC-00* */
-		
-	return proc_calc_metrics(page, start, off, count, eof, len);	
+
+	return proc_calc_metrics(page, start, off, count, eof, len);
 }
 
 static int amss_version_read_proc(char *page, char **start, off_t off,
@@ -205,47 +202,30 @@ static int amss_version_read_proc(char *page, char **start, off_t off,
 	snprintf(ver, sizeof(ver), fih_get_amss_version());
 
 	len = snprintf(page, count, "%s\n",ver);  /* MTD-BSP-VT-PROC-00* */
-		
+
 	return proc_calc_metrics(page, start, off, count, eof, len);
 }
 
-#ifndef CONFIG_FIH_FTM
-static int linux_version_read_proc(char *page, char **start, off_t off,
-				 int count, int *eof, void *data)
-{
-	int len;
-        /* MTD-BSP-VT-PROC-00* */
-	len = snprintf(page, count, "%s.%s.%s.%s.%s.%s\n",
-		VER_LINUX_BSP_Version,
-		VER_LINUX_Platform_Number,
-		VER_LINUX_Image_Type, 
-		VER_LINUX_Branch_Number,
-		VER_LINUX_Build_Number_Major,
-		VER_LINUX_Build_Number_Minor);
-		
-	return proc_calc_metrics(page, start, off, count, eof, len);
-}
-#endif
 /* MTD-BSP-VT-RECOVERY-00*[ */
 static int reboot_info_read_proc(char *page, char **start, off_t off,
 				 int count, int *eof, void *data)
 {
-    	int len;
+	int len;
 	char ver[10]={0};
 	unsigned int boot_info = get_boot_info();
-    
+
        if (boot_info == 0x77665502)
-    	{
+	{
            strncpy( ver, "recovery", 8);
 		   ver[8]='\0';
-    	}
+	}
        else
-    	{
+	{
            strncpy( ver, "normal", 6);
 		   ver[6]='\0';
-    	}
+	}
 	len = snprintf(page, count, "%s\n",ver); /* MTD-BSP-VT-PROC-00* */
-		
+
 	return proc_calc_metrics(page, start, off, count, eof, len);
 }
 /* MTD-BSP-VT-RECOVERY-00*] */
@@ -258,19 +238,16 @@ static struct {
 	{"baseband",	baseband_read_proc},
 	{"bandinfo",	band_read_proc},
 	{"amssversion",	amss_version_read_proc},
-	#ifndef CONFIG_FIH_FTM
-	{"linuxversion",  linux_version_read_proc},
-	#endif
 	{"rebootinfo",	reboot_info_read_proc},  /* MTD-BSP-VT-RECOVERY-00* */
 	{"siminfo", siminfo_read_proc},
 	{NULL,},
 };
 
 void fih_info_init(void)
-{	
+{
 	for (p = fih_info; p->name; p++)
 		create_proc_read_entry(p->name, 0, NULL, p->read_proc, NULL);
-		
+
 }
 EXPORT_SYMBOL(fih_info_init);
 

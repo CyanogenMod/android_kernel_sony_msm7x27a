@@ -77,6 +77,7 @@
 #define BQ27520_CS_DLOGEN		BIT(15)
 #define BQ27520_CS_SS		    BIT(13)
 #define BQ27520_CS_SNOOZE	    BIT(5)
+#define BQ27520_CS_OCVCMDCOMP 	BIT(9)
 #define BQ27520_CS_INITCOMP	    BIT(7)
 #define BQ27520_CS_QEN		    BIT(0)
 
@@ -233,6 +234,8 @@ int bq27520_isEnableBatteryCheck = 0;
 static int bq27520_polling_timeout = BQ27520_POLLING_STATUS;
 extern void msm_batt_update_psy_status(void);
 /* FIH-SW3-KERNEL-VH-CHARGING-13*] */
+
+extern void bq275x0_flash_recovery(bool reflash);
 
 extern void msmrtc_set_wakeup_cycle_time(int cycle_time);
 static int bq27520_i2c_txsubcmd(u8 reg, unsigned short subcmd,
@@ -518,9 +521,10 @@ void bq27520_battery_snooze_mode(bool SetSLP)
 }
 EXPORT_SYMBOL(bq27520_battery_snooze_mode);
 
+static int ctrl_flag = 0;
 static int bq27520_chip_config(struct bq27520_device_info *di)
 {
-	int flags = 0, ret = 0, ctrl_flag = 0;
+	int flags = 0, ret = 0;
 	int i = 0;
 
 	ret = bq27520_read(BQ27520_REG_FLAGS, &flags, 0, bq27520_di);
@@ -882,7 +886,7 @@ void bq27520_resch_change_polling_timeout(int second, int modify_timeout)
 {
 	int polling_timeout;
 
-	dev_info(bq27520_di->dev, "%s(%d %d)", __func__, second, modify_timeout);
+	dev_info(bq27520_di->dev, "%s(%d %d) %lu", __func__, second, modify_timeout, jiffies);
 	
 	polling_timeout = second * HZ;
 
@@ -924,7 +928,7 @@ static void bq27520_hw_config(struct work_struct *work)
 	ret = bq27520_chip_config(di);
 	if (ret) {
 		dev_err(di->dev, "Failed to config Bq27520 ret = %d\n", ret);
-		return;
+		goto exit;
 	}
 	/* bq27520 is ready for access, update current_battery_status by reading
 	 * from hardware
@@ -937,8 +941,11 @@ static void bq27520_hw_config(struct work_struct *work)
 	enable_irq(di->bat_low_irq);
 	enable_irq(di->ovp_irq);
 
-	schedule_delayed_work(&current_battery_status.poller,
-				bq27520_polling_timeout);
+	/*
+		If we enter rom mode, bq27520_hw_config will return when calling q27520_chip_config
+		and thus we can't have battery status updated, and no fake battery capacity reported to system
+		schedule_delayed_work(&current_battery_status.poller, (HZ)*0.5);
+	*/
     
 	if (di->pdata->enable_dlog) {
 		schedule_work(&di->counter);
@@ -956,10 +963,30 @@ static void bq27520_hw_config(struct work_struct *work)
 	bq27520_cntl_cmd(di, BQ27520_SUBCMD_FW_VER);
 	bq27520_read(BQ27520_REG_CNTL, &fw_ver, 0, di);
 
+	if  ((ctrl_flag & BQ27520_CS_INITCOMP) && !(ctrl_flag & BQ27520_CS_OCVCMDCOMP)) {
+		/* If initcomp set but ocvcmdcomp unset, let me flash again */
+		bq275x0_flash_recovery(true);
+	} else {
+		/* The gauge status is fine, just set flag into MFG info */
+		bq275x0_flash_recovery(false);
+	}
+
 	dev_info(di->dev, "DEVICE_TYPE is 0x%02X, FIRMWARE_VERSION \
 		is 0x%02X\n", type, fw_ver);
 	dev_info(di->dev, "Complete bq27520 configuration 0x%02X\n", flags);
+
+exit:
+	schedule_delayed_work(&current_battery_status.poller, (HZ)*0.5);
 }
+
+void schedule_bq27520_hw_config(void)
+{
+	if (bq27520_di) {
+		dev_info(bq27520_di->dev, "%s schedule hw config", __func__);
+		schedule_delayed_work(&bq27520_di->hw_config, BQ27520_INIT_DELAY);
+	}
+}
+EXPORT_SYMBOL(schedule_bq27520_hw_config);
 
 static int bq27520_read_i2c(u8 reg, int *rt_value, int b_single,
 			struct bq27520_device_info *di)
@@ -1213,76 +1240,80 @@ int bq275x0_battery_access_data_flash(unsigned char subclass,
                                         int write
                                         )
 {
-    int i        = 0;
-    unsigned sum = 0;
-    unsigned char cmd[33];
-    unsigned char block_num= offset / 32;
-    unsigned char cmd_code = BQ275X0_EXT_CMD_DFD + offset % 32;
-    unsigned char checksum = 0;
-    struct i2c_msg msg;
+#define WRITE_BLOCK_SIZE 32
 
-    if (!bq27520_di->client)
-	    return -ENODEV;
+	int i        = 0;
+	unsigned sum = 0;
+	unsigned char cmd[WRITE_BLOCK_SIZE + 1];
+	unsigned char block_num= offset / BLOCK_SIZE;
+	unsigned char checksum = 0;
+	struct i2c_msg msg;
+	int len_write;
+
+	if (!bq27520_di->client)
+		return -ENODEV;
 
 	msg.addr = bq27520_di->client->addr;
 	msg.flags = 0;
 	msg.len = 2;
 	msg.buf = &cmd[0];
 
-    
-    /* Set SEALED/UNSEALED mode. */
-    cmd[0] = BQ275X0_EXT_CMD_DFDCNTL;
-    cmd[1] = 0x00;
+
+	/* Set SEALED/UNSEALED mode. */
+	cmd[0] = BQ275X0_EXT_CMD_DFDCNTL;
+	cmd[1] = 0x00;
 	if (i2c_transfer(bq27520_di->client->adapter, &msg, 1) < 0)
 		return -EIO;
-    mdelay(1);
+	mdelay(1);
 	
-    /* Set subclass */
-    cmd[0] = BQ275X0_EXT_CMD_DFCLS;
-    cmd[1] = subclass;
+	/* Set subclass */
+	cmd[0] = BQ275X0_EXT_CMD_DFCLS;
+	cmd[1] = subclass;
 	if (i2c_transfer(bq27520_di->client->adapter, &msg, 1) < 0)
 		return -EIO;
-    mdelay(1);
+	mdelay(1);
 	
-    /* Set block to R/W */
-    cmd[0] = BQ275X0_EXT_CMD_DFBLK;
-    cmd[1] = block_num;
+	/* Set block to R/W */
+	cmd[0] = BQ275X0_EXT_CMD_DFBLK;
+	cmd[1] = block_num;
 	if (i2c_transfer(bq27520_di->client->adapter, &msg, 1) < 0)
 		return -EIO;
-    mdelay(1);
+	mdelay(1);
 	
-    if (write) {
-        /* Calculate checksum */
-        for (i = 0; i < len; i++)
-            sum += buf[i];
-        checksum = 0xFF - (sum & 0x00FF);
-        
-        /* Set checksum */
-        cmd[0] = BQ275X0_EXT_CMD_DFDCKS;
-        cmd[1] = checksum;
-        if (i2c_transfer(bq27520_di->client->adapter, &msg, 1) < 0)
-            return -EIO;
-        mdelay(1);
+	if (write) {
+		/* Calculate checksum */
+		for (i = 0; i < len; i++)
+			sum += buf[i];
+		checksum = 0xFF - (sum & 0x00FF);
 
-        /* Write data */
-        cmd[0] = cmd_code;
-        memcpy((cmd + 1), buf, len);
-        if (i2c_transfer(bq27520_di->client->adapter, &msg, 1) < 0)
-            return -EIO;
-        mdelay(1);
+		/* Write data */
+		cmd[0] = BQ275X0_EXT_CMD_DFD;
+		len_write = (len >= WRITE_BLOCK_SIZE) ? WRITE_BLOCK_SIZE : len;
+		memcpy((cmd + 1), buf, len_write);
+		msg.len = 1 + len_write;
+		if (i2c_transfer(bq27520_di->client->adapter, &msg, 1) < 0)
+			return -EIO;
+		mdelay(1);
 
-    } else {
-        /* Read data */
-        msg.flags = I2C_M_RD;
-        msg.len = 32;
-        msg.buf = buf;
+		/* Set checksum */
+		cmd[0] = BQ275X0_EXT_CMD_DFDCKS;
+		cmd[1] = checksum;
+		msg.len = 2;
+		if (i2c_transfer(bq27520_di->client->adapter, &msg, 1) < 0)
+			return -EIO;
+		mdelay(1);
+	} else {
+		/* Read data */
+		msg.flags = I2C_M_RD;
+		msg.len = 32;
+		msg.buf = buf;
 
-        if (i2c_transfer(bq27520_di->client->adapter, &msg, 1) < 0)
-            return -EIO;
-        mdelay(1);
-    }   
-    
-    return 0;
+		if (i2c_transfer(bq27520_di->client->adapter, &msg, 1) < 0)
+			return -EIO;
+		mdelay(1);
+	}
+
+	return 0;
 }
 
 int bq275x0_battery_fw_version(void)
@@ -1425,17 +1456,33 @@ EXPORT_SYMBOL(bq275x0_battery_enter_rom_mode);
 
 int bq275x0_battery_get_MfgInfo(char *buf)
 {
-    int retVal = -1;
-    int count = 0;
+	int retVal = -1;
+	int count = 0;
 
-    while((retVal != 0) && (count <= 3))
-    {
-       retVal = bq275x0_battery_access_data_flash(57, 0, buf, 32, false);
-       count++;
-    }
-    return retVal;
+	while((retVal != 0) && (count <= 3)) {
+		retVal = bq275x0_battery_access_data_flash(57, 0, buf, 32, false);
+		count++;
+	}
+	return retVal;
 }
 EXPORT_SYMBOL(bq275x0_battery_get_MfgInfo);
+
+int bq275x0_battery_write_MfgInfo(char *buf, int len)
+{
+	int retVal = -1;
+	int count = 0;
+	int writelen = (len < 32) ? len : 32;
+
+	dev_info(bq27520_di->dev, "BQFS wrtie MFG INFO\n");
+
+	while((retVal != 0) && (count <= 3)) {
+		retVal = bq275x0_battery_access_data_flash(57, 0, buf, writelen, true);
+		count++;
+	}
+
+	return retVal;
+}
+EXPORT_SYMBOL(bq275x0_battery_write_MfgInfo);
 
 int bq275x0_query_fw_ver(void)
 {
@@ -1701,7 +1748,13 @@ static int bq27520_battery_probe(struct i2c_client *client,
 	INIT_DELAYED_WORK(&current_battery_status.poller,
 			battery_status_poller);
 	INIT_DELAYED_WORK(&di->hw_config, bq27520_hw_config);
-	schedule_delayed_work(&di->hw_config, BQ27520_INIT_DELAY);
+
+	/*
+		Remove this because I will schedule this work at rommode driver
+		for detecting gauge firmware error, I need to read OCVCMDCOMP bit.
+		and MFG INFO; to make sure rommode driver init called before.
+		schedule_delayed_work(&di->hw_config, BQ27520_INIT_DELAY);
+	*/
 
     #ifdef CONFIG_FIH_FTM
     retval = device_create_file(&client->dev, &dev_attr_ftm_battery);
@@ -1844,6 +1897,9 @@ static void init_battery_status(void)
 static int __init bq27520_battery_init(void)
 {
 	int ret;
+
+	/* init the capacity to zero */
+	current_battery_status.status[GET_BATTERY_CAPACITY] = 0;
 
 	/* initialize current_battery_status, and register with msm-charger */
 	init_battery_status();

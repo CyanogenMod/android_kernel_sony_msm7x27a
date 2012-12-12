@@ -1025,7 +1025,12 @@ void mipi_dsi_mdp_busy_wait(struct msm_fb_data_type *mfd)
 		/* wait until DMA finishes the current job */
 		pr_debug("%s: pending pid=%d\n",
 				__func__, current->pid);
-		wait_for_completion(&dsi_mdp_comp);
+/* FIH-SW-MM-VH-DISPLAY-48*[ */
+		if(!wait_for_completion_timeout(&dsi_mdp_comp, 20*HZ))	{
+			printk(KERN_INFO "[DISPLAY] %s: Wait for dsi_mdp_comp timeout\n", __func__);
+			complete(&dsi_mdp_comp);
+		}
+/* FIH-SW-MM-VH-DISPLAY-48*] */
 	}
 	pr_debug("%s: done pid=%d\n",
 				__func__, current->pid);
@@ -1409,6 +1414,9 @@ int mipi_dsi_cmd_dma_tx(struct dsi_buf *tp)
 /*	wait_for_completion(&dsi_dma_comp); */
 	if (!wait_for_completion_timeout(&dsi_dma_comp, 10)) {
 		printk(KERN_INFO "[DISPLAY] %s: Send DSI command timeout\n", __func__);
+/* FIH-SW-MM-VH-DISPLAY-48+[ */
+		complete(&dsi_dma_comp);
+/* FIH-SW-MM-VH-DISPLAY-48+] */
 		ret = -1;
 	}
 /* FIH-SW3-MM-NC-LCM-00-]- */

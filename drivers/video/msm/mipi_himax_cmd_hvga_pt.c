@@ -88,6 +88,8 @@ static int __init mipi_cmd_himax_hvga_pt_init(void)
 	pinfo.lcd.vsync_enable = TRUE;
 	pinfo.lcd.hw_vsync_mode = TRUE;
 	pinfo.mipi.dsi_pclk_rate = 12000000;
+	/* FIH-SW-MM-VH-DISPLAY-40+ */
+	pinfo.lcm_model = 0;
 
 	ret = mipi_himax_device_register(&pinfo, MIPI_DSI_PRIM,
 						MIPI_DSI_PANEL_FWVGA_PT);

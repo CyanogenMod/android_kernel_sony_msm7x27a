@@ -1,4 +1,5 @@
 /*
+ * Copyright(C) 2011-2012 Foxconn International Holdings, Ltd. All rights reserved.
  *  drivers/cpufreq/cpufreq_ondemand.c
  *
  *  Copyright (C)  2001 Russell King
@@ -41,6 +42,10 @@
 #define MIN_FREQUENCY_UP_THRESHOLD		(11)
 #define MAX_FREQUENCY_UP_THRESHOLD		(100)
 #define MIN_FREQUENCY_DOWN_DIFFERENTIAL		(1)
+#ifdef CONFIG_FIH_INCREASE_CPU_FREQ_WHEN_INPUT_EVENT
+#define DEF_INPUT_EVENT_SAMPLING_DOWN_FACTOR	(1)
+#define MAX_INPUT_EVENT_SAMPLING_DOWN_FACTOR	(100000)
+#endif
 
 /*
  * The polling frequency of this governor depends on the capability of
@@ -94,6 +99,9 @@ struct cpu_dbs_info_s {
 	unsigned int rate_mult;
 	int cpu;
 	unsigned int sample_type:1;
+#ifdef CONFIG_FIH_INCREASE_CPU_FREQ_WHEN_INPUT_EVENT
+	unsigned int input_event:1;
+#endif
 	/*
 	 * percpu mutex that serializes governor limit change with
 	 * do_dbs_timer invocation. We do not want do_dbs_timer to run
@@ -125,12 +133,18 @@ static struct dbs_tuners {
 	unsigned int sampling_down_factor;
 	int          powersave_bias;
 	unsigned int io_is_busy;
+#ifdef CONFIG_FIH_INCREASE_CPU_FREQ_WHEN_INPUT_EVENT
+	unsigned int input_event_sampling_down_factor;
+#endif
 } dbs_tuners_ins = {
 	.up_threshold = DEF_FREQUENCY_UP_THRESHOLD,
 	.sampling_down_factor = DEF_SAMPLING_DOWN_FACTOR,
 	.down_differential = DEF_FREQUENCY_DOWN_DIFFERENTIAL,
 	.ignore_nice = 0,
 	.powersave_bias = 0,
+#ifdef CONFIG_FIH_INCREASE_CPU_FREQ_WHEN_INPUT_EVENT
+	.input_event_sampling_down_factor = DEF_INPUT_EVENT_SAMPLING_DOWN_FACTOR,
+#endif
 };
 
 static inline cputime64_t get_cpu_idle_time_jiffy(unsigned int cpu,
@@ -290,6 +304,9 @@ show_one(up_threshold, up_threshold);
 show_one(down_differential, down_differential);
 show_one(sampling_down_factor, sampling_down_factor);
 show_one(ignore_nice_load, ignore_nice);
+#ifdef CONFIG_FIH_INCREASE_CPU_FREQ_WHEN_INPUT_EVENT
+show_one(input_event_sampling_down_factor, input_event_sampling_down_factor);
+#endif
 
 static ssize_t show_powersave_bias
 (struct kobject *kobj, struct attribute *attr, char *buf)
@@ -482,6 +499,27 @@ static ssize_t store_powersave_bias(struct kobject *a, struct attribute *b,
 	return count;
 }
 
+#ifdef CONFIG_FIH_INCREASE_CPU_FREQ_WHEN_INPUT_EVENT
+static ssize_t store_input_event_sampling_down_factor(struct kobject *a,
+			struct attribute *b, const char *buf, size_t count)
+{
+	unsigned int input, j;
+	int ret;
+	ret = sscanf(buf, "%u", &input);
+
+	if (ret != 1 || input > MAX_INPUT_EVENT_SAMPLING_DOWN_FACTOR || input < 1)
+		return -EINVAL;
+	dbs_tuners_ins.input_event_sampling_down_factor = input;
+
+	/* Reset down sampling multiplier in case it was active */
+	for_each_online_cpu(j) {
+		struct cpu_dbs_info_s *dbs_info;
+		dbs_info = &per_cpu(od_cpu_dbs_info, j);
+		dbs_info->rate_mult = 1;
+	}
+	return count;
+}
+#endif
 define_one_global_rw(sampling_rate);
 define_one_global_rw(io_is_busy);
 define_one_global_rw(up_threshold);
@@ -489,6 +527,9 @@ define_one_global_rw(down_differential);
 define_one_global_rw(sampling_down_factor);
 define_one_global_rw(ignore_nice_load);
 define_one_global_rw(powersave_bias);
+#ifdef CONFIG_FIH_INCREASE_CPU_FREQ_WHEN_INPUT_EVENT
+define_one_global_rw(input_event_sampling_down_factor);
+#endif
 
 static struct attribute *dbs_attributes[] = {
 	&sampling_rate_min.attr,
@@ -499,6 +540,9 @@ static struct attribute *dbs_attributes[] = {
 	&ignore_nice_load.attr,
 	&powersave_bias.attr,
 	&io_is_busy.attr,
+#ifdef CONFIG_FIH_INCREASE_CPU_FREQ_WHEN_INPUT_EVENT
+	&input_event_sampling_down_factor.attr,
+#endif
 	NULL
 };
 
@@ -610,6 +654,14 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 			max_load_freq = load_freq;
 	}
 
+#ifdef CONFIG_FIH_INCREASE_CPU_FREQ_WHEN_INPUT_EVENT
+	if (this_dbs_info->input_event) {
+		this_dbs_info->input_event = 0;
+		this_dbs_info->rate_mult = dbs_tuners_ins.input_event_sampling_down_factor;
+		return;
+	}
+#endif
+
 	/* Check for frequency increase */
 	if (max_load_freq > dbs_tuners_ins.up_threshold * policy->cur) {
 		/* If switching to max speed, apply sampling_down_factor */
@@ -704,6 +756,9 @@ static inline void dbs_timer_init(struct cpu_dbs_info_s *dbs_info)
 		delay -= jiffies % delay;
 
 	dbs_info->sample_type = DBS_NORMAL_SAMPLE;
+#ifdef CONFIG_FIH_INCREASE_CPU_FREQ_WHEN_INPUT_EVENT
+	dbs_info->input_event = 0;
+#endif
 	INIT_DELAYED_WORK_DEFERRABLE(&dbs_info->work, do_dbs_timer);
 	schedule_delayed_work_on(dbs_info->cpu, &dbs_info->work, delay);
 }
@@ -754,13 +809,16 @@ static void dbs_refresh_callback(struct work_struct *unused)
 	}
 
 	if (policy->cur < policy->max) {
-		policy->cur = policy->max;
+		/*policy->cur = policy->max;*//*Kernel-SC-cpuFreq-none-sync-01-*/
 
 		__cpufreq_driver_target(policy, policy->max,
 					CPUFREQ_RELATION_L);
 		this_dbs_info->prev_cpu_idle = get_cpu_idle_time(cpu,
 				&this_dbs_info->prev_cpu_wall);
 	}
+#ifdef CONFIG_FIH_INCREASE_CPU_FREQ_WHEN_INPUT_EVENT
+	this_dbs_info->input_event = 1;
+#endif
 	unlock_policy_rwsem_write(cpu);
 }
 

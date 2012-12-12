@@ -87,6 +87,8 @@ static int __init mipi_video_himax_hvga_pt_init(void)
 	pinfo.mipi.yres_pad = 0;
 	pinfo.mipi.interleave_max = 1;
 	pinfo.mipi.insert_dcs_cmd = TRUE;
+	/* FIH-SW-MM-VH-DISPLAY-40+ */
+	pinfo.lcm_model = 0;
 
 	ret = mipi_himax_device_register(&pinfo, MIPI_DSI_PRIM,
 						MIPI_DSI_PANEL_FWVGA_PT);

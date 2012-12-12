@@ -17,11 +17,11 @@
 #include <mach/board.h>
 #include "fih_cam_api.h"
 
+/* FIH-SW3-MM-UW-flash tuning-04+*/
+#define offset_size    1002
 extern struct isx006_reg isx006_regs;
-/* FIH-SW3-MM-UW-flash tuning-00+*/
-extern int16_t x_1_5[];
-extern int16_t x_2[];
-/* FIH-SW3-MM-UW-flash tuning-00-*/
+extern int16_t x_8[offset_size];
+/* FIH-SW3-MM-UW-flash tuning-04-*/
 
 enum isx006_device_status {
 	STS_POWER_DOWN = 0,
@@ -189,6 +189,16 @@ struct isx006_reg {
     const struct isx006_i2c_reg_conf*reg_preload3;
     const unsigned short  reg_preload3_size;
     /* FIH-SW3-MM-URI-isx006 sensor setting-00- */
+    /* FIH-SW3-MM-UW-read vendor id-00+*/
+    const struct isx006_i2c_reg_conf*reg_preload2_2nd;
+    const unsigned short  reg_preload2_2nd_size;
+    const struct isx006_i2c_reg_conf*reg_preload3_2nd;
+    const unsigned short  reg_preload3_2nd_size;
+
+    const struct isx006_i2c_reg_conf*reg_preload3_reload;
+    const unsigned short  reg_preload3_reload_size;
+
+    /* FIH-SW3-MM-UW-read vendor id-00-*/
     const struct isx006_i2c_reg_conf *reg_arm_go;
     const unsigned short reg_arn_go_size;
     const struct isx006_i2c_reg_conf *reg_settings;
@@ -242,6 +252,13 @@ struct isx006_reg {
     const unsigned short reg_SHD_MIN_size;
     const struct isx006_i2c_reg_conf *reg_SHD_TYP;
     const unsigned short reg_SHD_TYP_size;
-    /* FIH-SW3-MM-UW-write OTP setting-00-*/	
+    /* FIH-SW3-MM-UW-write OTP setting-00-*/
+
+    const struct isx006_i2c_reg_conf *reg_SHD_MAX_2nd;
+    const unsigned short reg_SHD_MAX_2nd_size;
+    const struct isx006_i2c_reg_conf *reg_SHD_MIN_2nd;
+    const unsigned short reg_SHD_MIN_2nd_size;
+    const struct isx006_i2c_reg_conf *reg_SHD_TYP_2nd;
+    const unsigned short reg_SHD_TYP_2nd_size;
 };
 #endif /* ISX006_H */

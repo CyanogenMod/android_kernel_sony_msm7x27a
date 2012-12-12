@@ -37,8 +37,15 @@
 
 #include "mach/alog_ram_console.h"
 
-spinlock_t		bufflock;	/* spinlock for buffer */
+//MTD-kernel-BH-ParseRamdumpLastAlog-00+[
+#define DRIVER_DESC    "alog ram console driver"
+#define DRIVER_VERSION "0.2"
 
+MODULE_DESCRIPTION(DRIVER_DESC);
+MODULE_VERSION(DRIVER_VERSION);
+//MTD-kernel-BH-ParseRamdumpLastAlog-00+]
+
+spinlock_t		bufflock;	/* spinlock for buffer */
 
 /*
  * Android log priority values, in ascending priority order.
@@ -54,45 +61,6 @@ typedef enum android_LogPriority {
     ANDROID_LOG_FATAL,
     ANDROID_LOG_SILENT,     /* only for SetMinPriority(); must be last */
 } android_LogPriority;
-
-#if 0
-typedef enum {
-    FORMAT_OFF = 0,
-    FORMAT_BRIEF,
-    FORMAT_PROCESS,
-    FORMAT_TAG,
-    FORMAT_THREAD,
-    FORMAT_RAW,
-    FORMAT_TIME,
-    FORMAT_THREADTIME,
-    FORMAT_LONG,
-} AndroidLogPrintFormat;
-
-typedef long pthread_t;
-
-typedef struct FilterInfo_t {
-    char *mTag;
-    android_LogPriority mPri;
-    struct FilterInfo_t *p_next;
-} FilterInfo;
-
-typedef struct AndroidLogFormat_t {
-    android_LogPriority global_pri;
-    FilterInfo *filters;
-    AndroidLogPrintFormat format;
-} AndroidLogFormat;
-
-typedef struct AndroidLogEntry_t {
-    time_t tv_sec;
-    long tv_nsec;
-    android_LogPriority priority;
-    pid_t pid;
-    pthread_t tid;
-    const char * tag;
-    size_t messageLen;
-    const char * message;
-} AndroidLogEntry;
-#endif
 
 typedef struct LoggerEntry_t {
 	__u16		len;	/* length of the payload */
@@ -124,7 +92,11 @@ static char *alog_ram_console_old_log[LOG_TYPE_NUM];
 static size_t alog_ram_console_old_log_size[LOG_TYPE_NUM];
 
 static AlogRamConsoleBuffer *alog_ram_console_buffer[LOG_TYPE_NUM]; /* alog ram console structure identity */
-static size_t alog_ram_console_buffer_size[LOG_TYPE_NUM];           /* maximum of  usable alog ram console buffer size */
+ //MTD-kernel-BH-ParseRamdumpLastAlog-00+[
+static AlogRamConsoleBuffer *alog_ram_console_buffer_ext[LOG_TYPE_NUM] =  {NULL,NULL,NULL,NULL};
+struct proc_dir_entry *lastalog_entry[LOG_TYPE_NUM] =  {NULL,NULL,NULL,NULL};
+ //MTD-kernel-BH-ParseRamdumpLastAlog-00+]
+static size_t alog_ram_console_payload_size[LOG_TYPE_NUM];           /* maximum payload size of allog ram console buffer */
 static uint32_t alog_ram_console_signature[LOG_TYPE_NUM] = {        /* alog ram console signature */
 	ALOG_RAM_CONSOLE_MAIN_SIG,
 	ALOG_RAM_CONSOLE_RADIO_SIG,
@@ -137,6 +109,14 @@ static char* alog_ram_console_proc_fn[LOG_TYPE_NUM] = {  /* alog ram console pro
 	"last_alog_events",
 	"last_alog_system"
 };
+//MTD-kernel-BH-ParseRamdumpLastAlog-00+[
+static char* alog_ram_console_ext_proc_fn[LOG_TYPE_NUM] = {  /* alog ram console proc file name */
+	"last_alog_main_ext",
+	"last_alog_radio_ext",
+	"last_alog_events_ext",
+	"last_alog_system_ext"
+};
+//MTD-kernel-BH-ParseRamdumpLastAlog-00+]
 static char* alog_ram_console_res_name[LOG_TYPE_NUM] = { /* alog ram console resource name */
 	"alog_main_buffer",
 	"alog_radio_buffer",
@@ -220,7 +200,7 @@ int alog_ram_console_write_log(const LogType log_type, const void __user *user_b
 #ifdef BUFFER_DEBUG
 	int i = 0;
 
-	printk(KERN_INFO "[LastAlog] write_log: <log_type>:%d <buffer->start>:%d <buffer->size>:%d <rem>:%d <count>:%d", log_type, buffer->start, buffer->size, alog_ram_console_buffer_size[log_type] - buffer->start, count);
+	printk(KERN_INFO "[LastAlog] write_log: log_type:%d buffer->start:%d buffer->size:%d rem:%d count:%d", log_type, buffer->start, buffer->size, alog_ram_console_payload_size[log_type] - buffer->start, count);
 #endif
 	//MTD-KERNEL-BH-last_alog-01+[
 	if (user_buf && kernel_buf)
@@ -242,13 +222,13 @@ int alog_ram_console_write_log(const LogType log_type, const void __user *user_b
 		return 0;	
 	}
 	//MTD-KERNEL-BH-last_alog-01+]
-	rem = alog_ram_console_buffer_size[log_type] - buffer->start;
+	rem = alog_ram_console_payload_size[log_type] - buffer->start;
 
 	/* if buffer remain length < message length, update ram console by remain part, then restart pointer to 0 */
 	if (rem < count) 
 	{
 		s += rem;
-		buffer->size = alog_ram_console_buffer_size[log_type];
+		buffer->size = alog_ram_console_payload_size[log_type];
 		need_fix_reader[log_type] = 1; /* That means the reader positon must be fixed once overrun happens */
 		overrun = 1; /* overrun flag, default value is 0 in every log written */
 	}
@@ -285,7 +265,7 @@ int alog_ram_console_write_log(const LogType log_type, const void __user *user_b
 				next_entry_len =  temp_entry->len + sizeof(LoggerEntry);
 
 #ifdef BUFFER_DEBUG
-				printk(" => find: <next_log_entry>:0x%X <len>:%d <pos>:%d", (unsigned int)next_log_entry[log_type], next_entry_len, (unsigned int)next_log_entry[log_type] - (unsigned int)buffer->data);
+				printk(" => find: next_log_entry:0x%X len:%d pos:%d", (unsigned int)next_log_entry[log_type], next_entry_len, (unsigned int)next_log_entry[log_type] - (unsigned int)buffer->data);
 				printk(" [header: ");
 				for (i=0 ;i<20; i++)
 					printk("%02X ",*((char *)temp_entry+i));
@@ -310,8 +290,8 @@ int alog_ram_console_write_log(const LogType log_type, const void __user *user_b
 #ifdef BUFFER_DEBUG
 			temp_entry = (LoggerEntry *)next_log_entry[log_type];
 			next_entry_len =  temp_entry->len + sizeof(LoggerEntry);			
-			printk(" => final: <next_log_entry>:0x%X <len>:%d <pos>:%d", (unsigned int)next_log_entry[log_type], next_entry_len, (unsigned int)next_log_entry[log_type] - (unsigned int)buffer->data);
-			printk(" => fix up <reader_pos>:%d <offset>:%d", buffer->reader_pos, buffer->reader_pos - buffer->start - count);
+			printk(" => final: next_log_entry:0x%X len:%d pos:%d", (unsigned int)next_log_entry[log_type], next_entry_len, (unsigned int)next_log_entry[log_type] - (unsigned int)buffer->data);
+			printk(" => fix up reader_pos:%d offset:%d", buffer->reader_pos, buffer->reader_pos - buffer->start - count);
 #endif
 		}
 		else
@@ -384,445 +364,36 @@ int alog_ram_console_write_log(const LogType log_type, const void __user *user_b
 	}
 #endif
 	buffer->start += count; /* update start pointer */
-	if (buffer->size < alog_ram_console_buffer_size[log_type])
+	if (buffer->size < alog_ram_console_payload_size[log_type])
 		buffer->size += count; /* update used buffer size */
 #ifdef BUFFER_DEBUG
-	printk(" => <buffer->start>:%d\n", buffer->start);
+	printk(" => buffer->start:%d\n", buffer->start);
 #endif
 
 	return overrun;
 }
 
- //MTD-KERNEL-BH-last_alog-01-[
-#if 0
-/* CAUTION!!!this function is only for test usage, otherwise it might disorder log entry with logger. */
-void alog_ram_console_write_entry(const LogType log_type,
-										char *priority,
-										char * tag, int tag_bytes,
-										char * msg, int msg_bytes)
+static void alog_ram_console_save_old(const LogType log_type, char *dest, int isExt) //MTD-kernel-BH-ParseRamdumpLastAlog-00*
 {
-	struct timespec now;
-	LoggerEntry header;
-	unsigned long flags;
-	int overrun=0;
+	//MTD-kernel-BH-ParseRamdumpLastAlog-00*[
+	size_t old_log_size;
+	int reader_pos;
+	int start_pos;
+	AlogRamConsoleBuffer *src;
 
-	header.pid = current->tgid;
-	header.tid = current->pid;
-
-	now = current_kernel_time();
-	header.sec = now.tv_sec;
-	header.nsec = now.tv_nsec;
-
-	header.len = min_t(size_t, tag_bytes + msg_bytes + 1, LOGGER_ENTRY_MAX_PAYLOAD);
-
-	spin_lock_irqsave(&bufflock, flags);
-
-	overrun += alog_ram_console_write_log(log_type, (char *)&header, (int)sizeof(LoggerEntry));
-
-	overrun += alog_ram_console_write_log(log_type, priority, 1);
-
-	overrun += alog_ram_console_write_log(log_type, tag, tag_bytes);
-
-	overrun += alog_ram_console_write_log(log_type, msg, msg_bytes);
-
-	if (overrun)
-		alog_ram_console_sync_time(log_type, SYNC_AFTER);
-		
-	spin_unlock_irqrestore(&bufflock, flags);	//MTD-SW3-KERNEL-BH-FixLastAlog-00*
-}
-#endif
- //MTD-KERNEL-BH-last_alog-01-]
-#if 0
-/* following code segment is usaed for  */
-static android_LogPriority filterCharToPri (char c)
-{
-    android_LogPriority pri;
-
-    c = tolower(c);
-
-    if (c >= '0' && c <= '9') {
-        if (c >= ('0'+ANDROID_LOG_SILENT)) {
-            pri = ANDROID_LOG_VERBOSE;
-        } else {
-            pri = (android_LogPriority)(c - '0');
-        }
-    } else if (c == 'v') {
-        pri = ANDROID_LOG_VERBOSE;
-    } else if (c == 'd') {
-        pri = ANDROID_LOG_DEBUG;
-    } else if (c == 'i') {
-        pri = ANDROID_LOG_INFO;
-    } else if (c == 'w') {
-        pri = ANDROID_LOG_WARN;
-    } else if (c == 'e') {
-        pri = ANDROID_LOG_ERROR;
-    } else if (c == 'f') {
-        pri = ANDROID_LOG_FATAL;
-    } else if (c == 's') {
-        pri = ANDROID_LOG_SILENT;
-    } else if (c == '*') {
-        pri = ANDROID_LOG_DEFAULT;
-    } else {
-        pri = ANDROID_LOG_UNKNOWN;
-    }
-
-    return pri;
-}
-
-static char filterPriToChar (android_LogPriority pri)
-{
-    switch (pri) {
-        case ANDROID_LOG_VERBOSE:       return 'V';
-        case ANDROID_LOG_DEBUG:         return 'D';
-        case ANDROID_LOG_INFO:          return 'I';
-        case ANDROID_LOG_WARN:          return 'W';
-        case ANDROID_LOG_ERROR:         return 'E';
-        case ANDROID_LOG_FATAL:         return 'F';
-        case ANDROID_LOG_SILENT:        return 'S';
-
-        case ANDROID_LOG_DEFAULT:
-        case ANDROID_LOG_UNKNOWN:
-        default:                        return '?';
-    }
-}
-
-char *alog_formatLogLine (
-    AndroidLogFormat *p_format,
-    char *defaultBuffer,
-    size_t defaultBufferSize,
-    const AndroidLogEntry *entry,
-    size_t *p_outLength)
-{
-#if defined(HAVE_LOCALTIME_R)
-    /* struct tm tmBuf; */
-#endif
-    /* struct tm* ptm; */
-    char timeBuf[32];
-    char prefixBuf[128], suffixBuf[128];
-    char priChar;
-    int prefixSuffixIsHeaderFooter = 0;
-    char * ret = NULL;
-    size_t prefixLen, suffixLen;
-    size_t numLines;
-    char *p;
-    size_t bufferSize;
-    const char *pm;
-	
-    priChar = filterPriToChar(filterCharToPri(entry->priority));
-
-#if defined(HAVE_LOCALTIME_R)
-    /* ptm = localtime_r(&(entry->tv_sec), &tmBuf); */
-#else
-    /* ptm = localtime(&(entry->tv_sec)); */
-#endif
-    /* strftime(timeBuf, sizeof(timeBuf), "%m-%d %H:%M:%S", ptm); */
-	snprintf(timeBuf, sizeof(prefixBuf),"%d-%d %d:%d:%d", (unsigned int)entry->tv_sec%13, (unsigned int)entry->tv_sec%32, (unsigned int)entry->tv_sec%25, (unsigned int)entry->tv_sec%60, (unsigned int)entry->tv_sec%60);
-	
-    /*
-     * Construct a buffer containing the log header and log message.
-     */
-
-    switch (p_format->format) {
-        case FORMAT_TAG:
-            prefixLen = snprintf(prefixBuf, sizeof(prefixBuf),
-                "%c/%-8s: ", priChar, entry->tag);
-            strcpy(suffixBuf, "\n"); suffixLen = 1;
-            break;
-        case FORMAT_PROCESS:
-            prefixLen = snprintf(prefixBuf, sizeof(prefixBuf),
-                "%c(%5d) ", priChar, entry->pid);
-            suffixLen = snprintf(suffixBuf, sizeof(suffixBuf),
-                "  (%s)\n", entry->tag);
-            break;
-        case FORMAT_THREAD:
-            prefixLen = snprintf(prefixBuf, sizeof(prefixBuf),
-                "%c(%5d:%p) ", priChar, entry->pid, (void*)entry->tid);
-            strcpy(suffixBuf, "\n");
-            suffixLen = 1;
-            break;
-        case FORMAT_RAW:
-            prefixBuf[0] = 0;
-            prefixLen = 0;
-            strcpy(suffixBuf, "\n");
-            suffixLen = 1;
-            break;
-        case FORMAT_TIME:
-            prefixLen = snprintf(prefixBuf, sizeof(prefixBuf),
-                "%s.%03ld %c/%-8s(%5d): ", timeBuf, entry->tv_nsec / 1000000,
-                priChar, entry->tag, entry->pid);
-            strcpy(suffixBuf, "\n");
-            suffixLen = 1;
-            break;
-        case FORMAT_THREADTIME:
-            prefixLen = snprintf(prefixBuf, sizeof(prefixBuf),
-                "%s.%03ld %5d %5d %c %-8s: ", timeBuf, entry->tv_nsec / 1000000,
-                (int)entry->pid, (int)entry->tid, priChar, entry->tag);
-            strcpy(suffixBuf, "\n");
-            suffixLen = 1;
-            break;
-        case FORMAT_LONG:
-            prefixLen = snprintf(prefixBuf, sizeof(prefixBuf),
-                "[ %s.%03ld %5d:%p %c/%-8s ]\n",
-                timeBuf, entry->tv_nsec / 1000000, entry->pid,
-                (void*)entry->tid, priChar, entry->tag);
-            strcpy(suffixBuf, "\n\n");
-            suffixLen = 2;
-            prefixSuffixIsHeaderFooter = 1;
-            break;
-        case FORMAT_BRIEF:
-        default:
-            prefixLen = snprintf(prefixBuf, sizeof(prefixBuf),
-                "%c/%-8s(%5d): ", priChar, entry->tag, entry->pid);
-            strcpy(suffixBuf, "\n");
-            suffixLen = 1;
-            break;
-    }
-
-    /* the following code is tragically unreadable */
-
-    if (prefixSuffixIsHeaderFooter) {
-        /* we're just wrapping message with a header/footer */
-        numLines = 1;
-    } else {
-        pm = entry->message;
-        numLines = 0;
-
-        /*
-          The line-end finding here must match the line-end finding
-          in for ( ... numLines...) loop below
-        */
-        while (pm < (entry->message + entry->messageLen)) {
-            if (*pm++ == '\n') numLines++;
-        }
-        /* plus one line for anything not newline-terminated at the end */
-        if (pm > entry->message && *(pm-1) != '\n') numLines++;
-    }
-
-    /*
-      this is an upper bound--newlines in message may be counted
-     extraneously */
-    bufferSize = (numLines * (prefixLen + suffixLen)) + entry->messageLen + 1;
-
-    if (defaultBufferSize >= bufferSize) {
-        ret = defaultBuffer;
-    } else {
-        ret = (char *)kmalloc(bufferSize,GFP_KERNEL);
-
-        if (ret == NULL) {
-            return ret;
-        }
-    }
-
-    ret[0] = '\0';       /* to start strcat off */
-
-    p = ret;
-    pm = entry->message;
-
-    if (prefixSuffixIsHeaderFooter) {
-        strcat(p, prefixBuf);
-        p += prefixLen;
-        strncat(p, entry->message, entry->messageLen);
-        p += entry->messageLen;
-        strcat(p, suffixBuf);
-        p += suffixLen;
-    } else {
-        while(pm < (entry->message + entry->messageLen)) {
-            const char *lineStart;
-            size_t lineLen;
-
-            lineStart = pm;
-
-            /* Find the next end-of-line in message */
-            while (pm < (entry->message + entry->messageLen)
-                    && *pm != '\n') pm++;
-            lineLen = pm - lineStart;
-
-            strcat(p, prefixBuf);
-            p += prefixLen;
-            strncat(p, lineStart, lineLen);
-            p += lineLen;
-            strcat(p, suffixBuf);
-            p += suffixLen;
-
-            if (*pm == '\n') pm++;
-        }
-    }
-
-    if (p_outLength != NULL) {
-        *p_outLength = p - ret;
-    }
-
-    return ret;
-}
-
-static android_LogPriority filterPriForTag(AndroidLogFormat *p_format, const char *tag)
-{
-    FilterInfo *p_curFilter;
-
-    for (p_curFilter = p_format->filters
-            ; p_curFilter != NULL
-            ; p_curFilter = p_curFilter->p_next
-    ) {
-        if (0 == strcmp(tag, p_curFilter->mTag)) {
-            if (p_curFilter->mPri == ANDROID_LOG_DEFAULT) {
-                return p_format->global_pri;
-            } else {
-                return p_curFilter->mPri;
-            }
-        }
-    }
-
-    return p_format->global_pri;
-}
-
-int android_log_shouldPrintLine (AndroidLogFormat *p_format, const char *tag, android_LogPriority pri)
-{
-    return pri >= filterPriForTag(p_format, tag);
-}
-
-int alog_filterAndPrintLogLine(AndroidLogFormat *p_format, const AndroidLogEntry *entry,char * dest)
-{
-    char defaultBuffer[512];
-    char *outBuffer = NULL;
-    size_t totalLen;
-
-    if (0 == android_log_shouldPrintLine(p_format, entry->tag, entry->priority)) {
-        return 0;
-    }
-
-    outBuffer = alog_formatLogLine(p_format,defaultBuffer,sizeof(defaultBuffer), entry, &totalLen);
-
-    printk(KERN_INFO "[LastAlog] alog_filterAndPrintLogLine: <outBuffer>:%s", outBuffer);
-
-    if (!outBuffer)
-        return -1;
-
-   memcpy(dest, outBuffer,strlen(outBuffer)+1);
-
-    if (outBuffer != defaultBuffer) {
-        kfree(outBuffer);
-    }
-    return strlen(outBuffer)+1;
-}
-
-int alog_processLogBuffer(LoggerEntry *buf, AndroidLogEntry *entry)
-{
-    size_t tag_len;
-
-    entry->tv_sec = buf->sec;
-    entry->tv_nsec = buf->nsec;
-    entry->priority = buf->msg[0];
-    entry->pid = buf->pid;
-    entry->tid = buf->tid;
-    entry->tag = buf->msg + 1;
-    tag_len = strlen(entry->tag);
-    entry->messageLen = buf->len - tag_len - 3;
-    entry->message = entry->tag + tag_len + 1;
-
-    return 0;
-}
-
-LoggerEntry *get_next_entry(const LogType log_type, LoggerEntry *now_entry)
-{
-	char *next_entry;
-	LoggerEntry *temp_entry;
-	
-	if (now_entry == NULL)
-		next_entry = alog_ram_console_old_log[log_type];
-	else
-		next_entry = (char *)now_entry + now_entry->len + sizeof(LoggerEntry);
-
-	temp_entry = (LoggerEntry *)next_entry;	
-	if ( ((next_entry
-+ temp_entry->len - alog_ram_console_old_log[log_type]) > alog_ram_console_old_log_size[log_type]) || (temp_entry->len == 0))
-		return NULL;
-	else
-		return (LoggerEntry *)next_entry;
-}
-
-char * allocate_print_buffer(const LogType log_type)
-{
-	unsigned int entryNum=0;
-	char *next_entry;
-	LoggerEntry *temp_entry;	
-	unsigned int sizeCount=0,allocSize=0;
-	int next_entry_len;
-	int i;
-
-	next_entry = alog_ram_console_old_log[log_type];
-	do
+	if (isExt)
 	{
-		temp_entry = (LoggerEntry *)next_entry;	
-		next_entry_len = temp_entry->len + sizeof(LoggerEntry);
-		if ((sizeCount + next_entry_len) > alog_ram_console_old_log_size[log_type])
-			break;
-		sizeCount += next_entry_len;
-		entryNum++;
-		allocSize += MAX_PRINT_HEAD_SIZE + temp_entry->len;
-#ifdef OUTPUT_TEXT_DEBUG		
-		printk(KERN_INFO "[LastAlog] allocate_print_buffer: find <next_entry>:0x%X <entryNum>:%d <allocSize>:%d <sizeCount>:%d ", (unsigned int)next_entry, entryNum, allocSize, sizeCount);
-		printk(" [header: ");
-		for (i=0 ;i<20; i++)
-			printk("%02X ",*(next_entry+i));
-		printk("]");
-		printk(" [data: ");
-		for (i=0 ;i<temp_entry->len; i++)
-			printk("%02X ",*(next_entry+20+i));
-		printk("]\n");
-#endif		
-		next_entry += next_entry_len;
-	} while (sizeCount < alog_ram_console_old_log_size[log_type]);
-	
-	return kmalloc(allocSize, GFP_KERNEL);
-}
-
-char * filter_and_format_log(const LogType log_type, int * len)
-{
-
-	AndroidLogEntry alog_entry;
-	LoggerEntry *p_logger_entry;
-	char *print_buffer;
-	char *print_buffer_pos;
-	int i;
-
-	print_buffer=allocate_print_buffer(log_type);
-	if (print_buffer == NULL)
-	{
-		printk(KERN_ERR "[LastAlog] filter_and_format_log allocate print buffer failed\n");	
-		*len =0;		
-		return NULL;
+		src = alog_ram_console_buffer_ext[log_type];
 	}
-
-	print_buffer_pos = print_buffer;
-	p_logger_entry = NULL;
-	while ((p_logger_entry = get_next_entry( log_type, p_logger_entry)) != NULL)
+	else
 	{
-#ifdef OUTPUT_TEXT_DEBUG	
-		printk(KERN_INFO "<p_logger_entry>:0x%X ", (unsigned int)p_logger_entry);
-		printk(" [header: ");
-		for (i=0 ;i<20; i++)
-			printk("%02X ",*((char *)p_logger_entry+i));
-		printk("]");
-		printk(" [data: ");
-		for (i=0 ;i<p_logger_entry->len; i++)
-			printk("%02X ",*((char *)p_logger_entry+20+i));
-		printk("]\n");
-#endif		
-		alog_processLogBuffer(p_logger_entry, &alog_entry);
-		print_buffer_pos += alog_filterAndPrintLogLine(&g_format, (const AndroidLogEntry *)&alog_entry, print_buffer_pos);
+		src = alog_ram_console_buffer[log_type];
+
 	}
-
-	*len = (unsigned int)print_buffer_pos - (unsigned int)print_buffer;
-	return print_buffer;
-
-}
-#endif
-
-static void __init alog_ram_console_save_old(const LogType log_type, char *dest)
-{
-	size_t old_log_size = alog_ram_console_buffer[log_type]->size;
-	int reader_pos =  alog_ram_console_buffer[log_type]->reader_pos;
-	int start_pos = alog_ram_console_buffer[log_type]->start;
+	old_log_size = src->size;
+	reader_pos = src->reader_pos;
+	start_pos = src->start;
+	//MTD-kernel-BH-ParseRamdumpLastAlog-00*]
 
 	if (dest == NULL) {
 		dest = kmalloc(old_log_size, GFP_KERNEL);
@@ -835,19 +406,19 @@ static void __init alog_ram_console_save_old(const LogType log_type, char *dest)
 	/* copy old log by sequence */
 	alog_ram_console_old_log[log_type] = dest;
 	
-	if (old_log_size < alog_ram_console_buffer_size[log_type])
+	if (old_log_size < alog_ram_console_payload_size[log_type])
 	{
-		memcpy(alog_ram_console_old_log[log_type], alog_ram_console_buffer[log_type]->data, old_log_size);
+		memcpy(alog_ram_console_old_log[log_type], src->data, old_log_size);
 		alog_ram_console_old_log_size[log_type] = old_log_size;
 	}
 	else
 	{
-		memcpy(alog_ram_console_old_log[log_type], &alog_ram_console_buffer[log_type]->data[reader_pos], old_log_size - reader_pos);
-		memcpy(alog_ram_console_old_log[log_type] + old_log_size - reader_pos, alog_ram_console_buffer[log_type]->data, start_pos);
+		memcpy(alog_ram_console_old_log[log_type], &src->data[reader_pos], old_log_size - reader_pos);
+		memcpy(alog_ram_console_old_log[log_type] + old_log_size - reader_pos, src->data, start_pos);
 		alog_ram_console_old_log_size[log_type] = old_log_size - reader_pos + start_pos;
 	}
 
-	printk(KERN_ERR "[LastAlog] save_old: alog_ram_console_old_log[%d]=0x%x alog_ram_console_old_log_size[%d]=%d reader_pos=%d start_pos=%d old_log_size=%d\n", log_type, (unsigned int)alog_ram_console_old_log[log_type], log_type, alog_ram_console_old_log_size[log_type], reader_pos, start_pos, old_log_size);
+	printk(KERN_ERR "[LastAlog] save_old: alog_ram_console_old_log[%d]=0x%X alog_ram_console_old_log_size[%d]=%d reader_pos=%d start_pos=%d buffer_size=%d\n", log_type, (unsigned int)alog_ram_console_old_log[log_type], log_type, alog_ram_console_old_log_size[log_type], reader_pos, start_pos, old_log_size);
 
 }
 
@@ -855,34 +426,22 @@ static int __init alog_ram_console_init(const LogType log_type, AlogRamConsoleBu
 {
 	alog_ram_console_buffer[log_type] = buffer;
 
-#if 0
-	/* init default filter and format */
-	g_format.format=FORMAT_TIME;
-	g_format.global_pri=ANDROID_LOG_DEFAULT;
-	g_format.filters=NULL;
-#endif
-
 	/* set maximum of  usable alog ram console buffer size */
-	alog_ram_console_buffer_size[log_type] = buffer_size - sizeof(AlogRamConsoleBuffer);
-	
-	printk(KERN_INFO "[LastAlog] init for log type:%d <alog_ram_console_buffer>:0x%x <alog_ram_console_buffer_size>:%d(0x%x) <buffer->data>:0x%x\n", log_type, (unsigned int)alog_ram_console_buffer[log_type], alog_ram_console_buffer_size[log_type], alog_ram_console_buffer_size[log_type], (unsigned int)buffer->data);
-
-	if (alog_ram_console_buffer_size[log_type] > buffer_size) {
-		printk(KERN_ERR "[LastAlog] init for log type:%d buffer %p, invalid size %zu, datasize %zu\n", log_type, buffer, buffer_size, alog_ram_console_buffer_size[log_type]);
-		return 0;
-	}
+	//MTD-kernel-BH-ParseRamdumpLastAlog-00*[
+	alog_ram_console_payload_size[log_type] = buffer_size - sizeof(AlogRamConsoleBuffer) ;
+	printk(KERN_INFO "[LastAlog] init for log type:%d alog_ram_console_buffer:0x%x alog_ram_console_payload_size:%d(0x%x) buffer->data:0x%x\n", log_type, (unsigned int)alog_ram_console_buffer[log_type], alog_ram_console_payload_size[log_type], alog_ram_console_payload_size[log_type], (unsigned int)buffer->data); //MTD-kernel-BH-ParseRamdumpLastAlog-00*
 
 	/* if alog ram console has correct signature, that means there are logs in ram console */
 	if (buffer->sig == alog_ram_console_signature[log_type]) 
 	{
-		if (buffer->size > alog_ram_console_buffer_size[log_type] || buffer->start > buffer->size)
+		if (buffer->size > alog_ram_console_payload_size[log_type] || buffer->start > buffer->size)
 			printk(KERN_INFO "[LastAlog] init for log type:%d found existing invalid buffer, size %d, start %d\n", log_type, buffer->size, buffer->start);
 		else 
 		{
-			printk(KERN_INFO "[LastAlog] init for log type:%d found existing buffer, size %d, start %d\n", log_type, buffer->size, buffer->start);
-			alog_ram_console_save_old(log_type, old_buf); /* save old log */
+			printk(KERN_INFO "[LastAlog] init for log type:%d found existing buffer, size %d, start %d, reader_pos %d\n", log_type, buffer->size, buffer->start, buffer->reader_pos);
+			alog_ram_console_save_old(log_type, old_buf,0); /* save old log */
 		}
-	} 
+	} //MTD-kernel-BH-ParseRamdumpLastAlog-00*]
 	else 
 	{
 		printk(KERN_INFO "[LastAlog] init for log type:%d no valid data in buffer (sig = 0x%08x)\n", log_type, buffer->sig);
@@ -954,40 +513,50 @@ static int __init alog_ram_console_module_init(void)
 	return err;
 }
 
+//MTD-kernel-BH-ParseRamdumpLastAlog-00+[
+static int alog_ram_console_read_old(const LogType log_type, char __user *buf,
+											size_t len, loff_t pos, ssize_t *count)
+{
+	LoggerEntry *pLogEntry;
+
+	if (pos > alog_ram_console_old_log_size[log_type])
+	{
+		pr_err("[LastAlog] read_old: stop by pos:%d > alog_ram_console_old_log_size[%d]:%d", (int)pos, log_type,  alog_ram_console_old_log_size[log_type]);
+		return -EFAULT;
+	}
+
+	if (pos == alog_ram_console_old_log_size[log_type])
+	{
+		*count=0;
+		return 0;
+	}
+
+	pLogEntry = (LoggerEntry *)(alog_ram_console_old_log[log_type] + pos);
+	if ( (pos + sizeof(LoggerEntry) + pLogEntry->len) > alog_ram_console_old_log_size[log_type])
+	{
+		pr_info("[LastAlog] read_old: stop by (pos:%d + 20 + pLogEntry->len:%d) > alog_ram_console_old_log_size[%d]:%d", (int)pos, pLogEntry->len, log_type,  alog_ram_console_old_log_size[log_type]);
+		return -EFAULT;
+	}
+	
+	*count = min((ssize_t)len, (ssize_t)(pLogEntry->len + sizeof(LoggerEntry)));
+
+	if (copy_to_user(buf, alog_ram_console_old_log[log_type] + pos, *count))
+	{
+	pr_err("[LastAlog] read_old: fail to copy to user\n");
+		return -EFAULT;
+	}
+
+	return 0;
+}
+//MTD-kernel-BH-ParseRamdumpLastAlog-00+]
+//MTD-kernel-BH-ParseRamdumpLastAlog-00*[
 static ssize_t alog_ram_console_read_old_main(struct file *file, char __user *buf,
 				    size_t len, loff_t *offset)
 {
-	loff_t pos = *offset;
 	ssize_t count;
-	LoggerEntry *pLogEntry;
 
-	/* printk(KERN_ERR "[LastAlog] alog_ram_console_read_old_main: len:%d offset:%d ", len, (int)pos); */
-
-	if (pos >= alog_ram_console_old_log_size[LOG_TYPE_MAIN])
-		return 0;
-
-	pLogEntry = (LoggerEntry *)(alog_ram_console_old_log[LOG_TYPE_MAIN] + pos);
-	if ( (pos + sizeof(LoggerEntry) + pLogEntry->len) > alog_ram_console_old_log_size[LOG_TYPE_MAIN])
-		return 0;
-	count = min(len, pLogEntry->len + sizeof(LoggerEntry));
-/*
-	following code segment is used for reading whole raw data into user-space code directly
-	count = min(len, (size_t)(alog_ram_console_old_log_size[LOG_TYPE_MAIN] - pos));
-*/	
-	if (copy_to_user(buf, alog_ram_console_old_log[LOG_TYPE_MAIN] + pos, count))
+	if (alog_ram_console_read_old(LOG_TYPE_MAIN, buf, len, *offset, &count))
 		return -EFAULT;
-	
-#ifdef OUTPUT_TEXT
-	/* following code segment is used for converting whole raw data to readable text for user-space code	*/
-	outBuf = filter_and_format_log(LOG_TYPE_MAIN, &count);
-	if (copy_to_user(buf, outBuf, count))
-		return -EFAULT;
-		
-	if (outBuf != NULL)
-		kfree(outBuf);
-#endif
-
-	/* printk("count:%d\n", count); */
 
 	*offset += count;
 	return count;
@@ -996,25 +565,11 @@ static ssize_t alog_ram_console_read_old_main(struct file *file, char __user *bu
 static ssize_t alog_ram_console_read_old_radio(struct file *file, char __user *buf,
 				    size_t len, loff_t *offset)
 {
-	loff_t pos = *offset;
 	ssize_t count;
-	LoggerEntry *pLogEntry;
 
-	/* printk(KERN_ERR "[LastAlog] alog_ram_console_read_old_radio: len:%d offset:%d ", len, (int)pos); */
-
-	if (pos >= alog_ram_console_old_log_size[LOG_TYPE_RADIO])
-		return 0;
-
-	pLogEntry = (LoggerEntry *)(alog_ram_console_old_log[LOG_TYPE_RADIO] + pos);
-	if ( (pos + sizeof(LoggerEntry) + pLogEntry->len) > alog_ram_console_old_log_size[LOG_TYPE_RADIO])
-		return 0;
-	count = min(len, pLogEntry->len + sizeof(LoggerEntry));
-
-	if (copy_to_user(buf, alog_ram_console_old_log[LOG_TYPE_RADIO] + pos, count))
+	if (alog_ram_console_read_old(LOG_TYPE_RADIO, buf, len, *offset, &count))
 		return -EFAULT;
-	
-	/* printk("count:%d\n", count); */
-	
+
 	*offset += count;
 	return count;
 }
@@ -1022,24 +577,10 @@ static ssize_t alog_ram_console_read_old_radio(struct file *file, char __user *b
 static ssize_t alog_ram_console_read_old_events(struct file *file, char __user *buf,
 				    size_t len, loff_t *offset)
 {
-	loff_t pos = *offset;
 	ssize_t count;
-	LoggerEntry *pLogEntry;
 
-	/* printk(KERN_ERR "[LastAlog] alog_ram_console_read_old_events: len:%d offset:%d ", len, (int)pos); */
-
-	if (pos >= alog_ram_console_old_log_size[LOG_TYPE_EVENTS])
-		return 0;
-
-	pLogEntry = (LoggerEntry *)(alog_ram_console_old_log[LOG_TYPE_EVENTS] + pos);
-	if ( (pos + sizeof(LoggerEntry) + pLogEntry->len) > alog_ram_console_old_log_size[LOG_TYPE_EVENTS])
-		return 0;
-	count = min(len, pLogEntry->len + sizeof(LoggerEntry));
-
-	if (copy_to_user(buf, alog_ram_console_old_log[LOG_TYPE_EVENTS] + pos, count))
+	if (alog_ram_console_read_old(LOG_TYPE_EVENTS, buf, len, *offset, &count))
 		return -EFAULT;
-
-	/*printk("count:%d\n", count); */
 
 	*offset += count;
 	return count;
@@ -1048,39 +589,15 @@ static ssize_t alog_ram_console_read_old_events(struct file *file, char __user *
 static ssize_t alog_ram_console_read_old_system(struct file *file, char __user *buf,
 				    size_t len, loff_t *offset)
 {
-	loff_t pos = *offset;
 	ssize_t count;
-	LoggerEntry *pLogEntry;
 
-	/* printk(KERN_ERR "[LastAlog] alog_ram_console_read_old_system: len:%d offset:%d ", len, (int)pos); */
-
-	if (pos >= alog_ram_console_old_log_size[LOG_TYPE_SYSTEM])
-		return 0;
-
-	pLogEntry = (LoggerEntry *)(alog_ram_console_old_log[LOG_TYPE_SYSTEM] + pos);
-	if ( (pos + sizeof(LoggerEntry) + pLogEntry->len) > alog_ram_console_old_log_size[LOG_TYPE_SYSTEM])
-		return 0;
-	count = min(len, pLogEntry->len + sizeof(LoggerEntry));
-/*
-	 following code segment is used for reading whole raw data into user-space code directly
-	count = min(len, (size_t)(alog_ram_console_old_log_size[LOG_TYPE_SYSTEM] - pos));
-*/	
-	if (copy_to_user(buf, alog_ram_console_old_log[LOG_TYPE_SYSTEM] + pos, count))
+	if (alog_ram_console_read_old(LOG_TYPE_SYSTEM, buf, len, *offset, &count))
 		return -EFAULT;
-	
-#ifdef OUTPUT_TEXT
-	/* following code segment is used for converting whole raw data to readable text for user-space code	*/
-	outBuf = filter_and_format_log(LOG_TYPE_SYSTEM, &count);
-	if (copy_to_user(buf, outBuf, count))
-		return -EFAULT;
-		
-	if (outBuf != NULL)
-		kfree(outBuf);
-#endif
 
 	*offset += count;
 	return count;
 }
+//MTD-kernel-BH-ParseRamdumpLastAlog-00*]
 
 static struct file_operations alog_ram_console_file_ops[LOG_TYPE_NUM] = {
 	{
@@ -1100,7 +617,187 @@ static struct file_operations alog_ram_console_file_ops[LOG_TYPE_NUM] = {
 	.read = alog_ram_console_read_old_system,
 	}
 };
+//MTD-kernel-BH-ParseRamdumpLastAlog-00+[
+static ssize_t alog_ram_console_write_ext(const LogType log_type, struct file *file, const char __user *buf,
+				    size_t len, loff_t *offset)
+{
+	int whole_buffer_size = alog_ram_console_payload_size[log_type] + sizeof(AlogRamConsoleBuffer);
 
+	if (!alog_ram_console_buffer_ext[log_type])
+	{
+		alog_ram_console_buffer_ext[log_type] = (AlogRamConsoleBuffer *)kmalloc(whole_buffer_size, GFP_KERNEL);
+		if (!alog_ram_console_buffer_ext[log_type])
+		{
+			pr_err("LastAlog] write_ext: failed to allocate external alog ram console buffer\n");
+			return -EFAULT;
+		}
+	}
+
+	if ((*offset + len) > whole_buffer_size)
+	{
+		pr_err("[LastAlog] write_ext: stop by (offset:%d + len:%d) > whole_buffer_size:%d\n", (int)*offset, (int)len, whole_buffer_size);
+		return -EFAULT;
+	}
+
+    if(copy_from_user((char*)alog_ram_console_buffer_ext[log_type]+*offset, buf, len))
+    {
+	pr_err("[LastAlog] write_ext: fail to copy from user\n");
+        return -EFAULT;
+    }
+    *offset +=  len;
+
+	return len;
+}
+
+static ssize_t alog_ram_console_write_ext_main(struct file *file, const char __user *buf,
+				    size_t len, loff_t *offset)
+{
+	return alog_ram_console_write_ext(LOG_TYPE_MAIN, file, buf, len, offset);
+}
+
+static ssize_t alog_ram_console_write_ext_radio(struct file *file, const char __user *buf,
+				    size_t len, loff_t *offset)
+{
+	return alog_ram_console_write_ext(LOG_TYPE_RADIO, file, buf, len, offset);
+}
+
+static ssize_t alog_ram_console_write_ext_events(struct file *file, const char __user *buf,
+				    size_t len, loff_t *offset)
+{
+	return alog_ram_console_write_ext(LOG_TYPE_EVENTS, file, buf, len, offset);
+}
+
+static ssize_t alog_ram_console_write_ext_system(struct file *file, const char __user *buf,
+				    size_t len, loff_t *offset)
+{
+	return alog_ram_console_write_ext(LOG_TYPE_SYSTEM, file, buf, len, offset);
+}
+
+static int alog_ram_console_read_ext(const LogType log_type, char __user *buf,
+				    size_t len, loff_t pos, ssize_t *count)
+{
+	int whole_buffer_size = alog_ram_console_payload_size[log_type] + sizeof(AlogRamConsoleBuffer);
+
+	*count = 0;
+
+	if (pos > whole_buffer_size)
+	{
+		pr_err("[LastAlog] read_ext: stopy by pos:%d > whole_buffer_size:%d\n", (int)pos, whole_buffer_size);
+		return -EFAULT;
+	}
+
+	if (pos == 0)
+	{
+		if (alog_ram_console_old_log[log_type])
+		{
+			pr_info("[LastAlog] read_ext: free alog_ram_console_old_log[%d]\n", log_type);
+			kfree(alog_ram_console_old_log[log_type]);
+		}
+
+		alog_ram_console_save_old(log_type,NULL,1);
+
+		if (!lastalog_entry[log_type])
+		{
+			lastalog_entry[log_type]  = create_proc_entry(alog_ram_console_proc_fn[log_type], S_IFREG | S_IRUGO, NULL);
+			if (!lastalog_entry[log_type])
+			{
+				pr_err("[LastAlog] alog_ram_console_read_ext_main: failed to create proc entry - /proc/%s\n", alog_ram_console_proc_fn[log_type]);
+				kfree(alog_ram_console_old_log[log_type]);
+				alog_ram_console_old_log[log_type] = NULL;
+				return -EFAULT;
+			}
+
+			lastalog_entry[log_type] ->proc_fops = &alog_ram_console_file_ops[log_type];
+			lastalog_entry[log_type] ->size = alog_ram_console_old_log_size[log_type];
+		}
+		else
+			lastalog_entry[log_type] ->size = alog_ram_console_old_log_size[log_type];
+
+		*count = whole_buffer_size;
+	}
+#if 0
+	*count = min((ssize_t)len, (ssize_t)(whole_buffer_size - pos));
+	if (copy_to_user(buf, (char*)alog_ram_console_buffer_ext[LOG_TYPE_MAIN] + pos, *count))
+	{
+	pr_err("[LastAlog] read_ext: fail to copy to user\n");
+		return -EFAULT;
+	}
+#endif
+		return 0;
+}
+
+
+static ssize_t alog_ram_console_read_ext_main(struct file *file, char __user *buf,
+				    size_t len, loff_t *offset)
+{
+	ssize_t count;
+
+	if (alog_ram_console_read_ext(LOG_TYPE_MAIN, buf, len, *offset, &count))
+		return -EFAULT;
+
+	*offset += count;
+	return count;
+}
+
+static ssize_t alog_ram_console_read_ext_radio(struct file *file, char __user *buf,
+				    size_t len, loff_t *offset)
+{
+	ssize_t count;
+
+	if (alog_ram_console_read_ext(LOG_TYPE_RADIO, buf, len, *offset, &count))
+		return -EFAULT;
+
+	*offset += count;
+	return count;
+}
+
+static ssize_t alog_ram_console_read_ext_events(struct file *file, char __user *buf,
+				    size_t len, loff_t *offset)
+{
+	ssize_t count;
+
+	if (alog_ram_console_read_ext(LOG_TYPE_EVENTS, buf, len, *offset, &count))
+		return -EFAULT;
+
+	*offset += count;
+	return count;
+}
+
+static ssize_t alog_ram_console_read_ext_system(struct file *file, char __user *buf,
+				    size_t len, loff_t *offset)
+{
+	ssize_t count;
+	
+	if (alog_ram_console_read_ext(LOG_TYPE_SYSTEM, buf, len, *offset, &count))
+		return -EFAULT;
+		
+	*offset += count;
+	return count;
+}
+
+static struct file_operations alog_ram_console_ext_file_ops[LOG_TYPE_NUM] = {
+	{
+	.owner = THIS_MODULE,
+	.write = alog_ram_console_write_ext_main,
+	.read = alog_ram_console_read_ext_main,
+	},
+	{
+	.owner = THIS_MODULE,
+	.write = alog_ram_console_write_ext_radio,
+	.read = alog_ram_console_read_ext_radio,
+	},
+	{
+	.owner = THIS_MODULE,
+	.write = alog_ram_console_write_ext_events,
+	.read = alog_ram_console_read_ext_events,
+	},
+	{
+	.owner = THIS_MODULE,
+	.write = alog_ram_console_write_ext_system,
+	.read = alog_ram_console_read_ext_system,
+	}
+};
+//MTD-kernel-BH-ParseRamdumpLastAlog-00+]
 static int __init alog_ram_console_late_init(void)
 {
 	struct proc_dir_entry *entry;
@@ -1108,10 +805,12 @@ static int __init alog_ram_console_late_init(void)
 
 	/* create a proc file to read old log for alog ram console */
 	for (i=0; i<LOG_TYPE_NUM; i++)
-		if (alog_ram_console_old_log[i] != NULL)
 		{
-			entry = create_proc_entry(alog_ram_console_proc_fn[i], S_IFREG | S_IRUGO, NULL);
-			if (!entry) 
+		if (alog_ram_console_old_log[i])
+		{
+			//MTD-kernel-BH-ParseRamdumpLastAlog-00*[
+			lastalog_entry[i]  = create_proc_entry(alog_ram_console_proc_fn[i], S_IFREG | S_IRUGO, NULL);
+			if (!lastalog_entry[i])
 			{
 				printk(KERN_ERR "[LastAlog] late_init: failed to create proc entry - /proc/%s\n", alog_ram_console_proc_fn[i]);
 				kfree(alog_ram_console_old_log[i]);
@@ -1119,8 +818,20 @@ static int __init alog_ram_console_late_init(void)
 				return -EFAULT;
 			}
 
-			entry->proc_fops = &alog_ram_console_file_ops[i];
-			entry->size = alog_ram_console_old_log_size[i];
+			lastalog_entry[i] ->proc_fops = &alog_ram_console_file_ops[i];
+			lastalog_entry[i] ->size = alog_ram_console_old_log_size[i];
+			//MTD-kernel-BH-ParseRamdumpLastAlog-00*]
+		}
+		//MTD-kernel-BH-ParseRamdumpLastAlog-00+[
+		entry = create_proc_entry(alog_ram_console_ext_proc_fn[i], S_IFREG | S_IRUGO | S_IWUGO, NULL);
+		if (!entry)
+		{
+			pr_err("[LastAlog] late_init: failed to create proc entry - /proc/%s\n", alog_ram_console_ext_proc_fn[i]);
+			return -EFAULT;
+		}
+		entry->proc_fops = &alog_ram_console_ext_file_ops[i];
+		entry->size = alog_ram_console_payload_size[i] + sizeof(AlogRamConsoleBuffer);
+		//MTD-kernel-BH-ParseRamdumpLastAlog-00+]
 		}
 		
 	return 0;

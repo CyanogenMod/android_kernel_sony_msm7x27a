@@ -1312,7 +1312,7 @@ static int qpdss702_gpio_init(void)
 
 static struct qpdss702_platform_data qpdss702_platform_data = {
     .gpio_init = qpdss702_gpio_init,
-    .sensitivity = QPDSS207_SENSITIVITY_LEVEL8,/*FIH-SW1-PERIPHERAL-AC-PSENSOR_SENSITIVITY-02*/
+    .sensitivity = QPDSS207_SENSITIVITY_LEVEL2,/*FIH-SW1-PERIPHERAL-AC-PSENSOR_SENSITIVITY-03*/
 };
 #endif
 /* FIH-SW1-PERIPHERAL-FG-PSENSOR-00+] */
@@ -1326,11 +1326,11 @@ static struct qpdss702_platform_data qpdss702_platform_data = {
 static ssize_t tma340_virtual_keys_show(struct kobject *kobj,
                                struct kobj_attribute *attr, char *buf)
 {
-/* center: x: back: 53, menu: 160, home: 267, y: 523 SHIFT for moving down 14 points away  TOUCH AA */
+/* center: x: back: 65, menu: 415, home: 240, y: 912 SHIFT for moving down 14 points away  TOUCH AA */
 				return sprintf(buf,
-                      __stringify(EV_KEY) ":" __stringify(KEY_BACK)    ":80:915:80:102"
-                   ":" __stringify(EV_KEY) ":" __stringify(KEY_HOME)  ":240:915:80:102"
-                   ":" __stringify(EV_KEY) ":" __stringify(KEY_MENU)  ":400:915:80:102"
+                      __stringify(EV_KEY) ":" __stringify(KEY_BACK)    ":65:912:130:102"
+                   ":" __stringify(EV_KEY) ":" __stringify(KEY_HOME)  ":240:912:130:102"
+                   ":" __stringify(EV_KEY) ":" __stringify(KEY_MENU)  ":415:912:130:102"
                    "\n");
 }
 
@@ -1510,7 +1510,7 @@ static struct cyttsp_platform_data cypress_i2c_ttsp_platform_data = {
 	.use_st = 0, /*support single-touch*/
 	.use_mt = 1, /*support multi-touch*/
 	.use_trk_id = 1, 
-	.use_hndshk = 1, 
+	.use_hndshk = 0, /*FIH-MTD-PERIPHERAL-CH-Handshake-00++*/
 	.use_timer = 0, /*use polling*/
 	.use_sleep = 1, /*deep sleep mode for early suspend/late resume*/
 	.use_gestures = 0, /*use gestures function*/
@@ -1698,7 +1698,13 @@ static struct msm_i2c_platform_data msm_gsbi1_qup_i2c_pdata = {
 
 
 #ifdef CONFIG_FB_MSM_TRIPLE_BUFFER
+/* FIH-SW2-MM-KW-RGBA8888-00+{ */
+#if defined(CONFIG_FB_MSM_DEFAULT_DEPTH_RGBA8888)
+#define MSM_FB_SIZE		0x4C0000
+#else
 #define MSM_FB_SIZE		0x261000
+#endif
+/* FIH-SW2-MM-KW-RGBA8888-00-} */
 #define MSM7x25A_MSM_FB_SIZE	0xE1000
 #else
 #define MSM_FB_SIZE		0x196000
@@ -1898,15 +1904,15 @@ static struct msm_gpio sdc1_cfg_data[] = {
 };
 
 static struct msm_gpio sdc1_sleep_cfg_data[] = {
-	{GPIO_CFG(51, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),
+	{GPIO_CFG(51, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA),
 								"sdc1_dat_3"},
-	{GPIO_CFG(52, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),
+	{GPIO_CFG(52, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA),
 								"sdc1_dat_2"},
-	{GPIO_CFG(53, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),
+	{GPIO_CFG(53, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA),
 								"sdc1_dat_1"},
-	{GPIO_CFG(54, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),
+	{GPIO_CFG(54, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA),
 								"sdc1_dat_0"},
-	{GPIO_CFG(55, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP, GPIO_CFG_2MA),
+	{GPIO_CFG(55, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA),
 								"sdc1_cmd"},
 	{GPIO_CFG(56, 0, GPIO_CFG_INPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA),
 								"sdc1_clk"},
@@ -2135,7 +2141,12 @@ static uint32_t msm_sdcc_setup_power(struct device *dv, unsigned int vdd)
 	if (rc)
 		goto out;
 
-	rc = msm_sdcc_setup_vreg(pdev->id, !!vdd);
+//CONN-EC-Regulator-01*[
+    if (pdev->id == WLAN_SLOT) {
+    } else {
+	    rc = msm_sdcc_setup_vreg(pdev->id, !!vdd);
+    }
+//CONN-EC-Regulator-01*]
 out:
 	return rc;
 }
@@ -2281,8 +2292,10 @@ static void __init msm7x27a_init_mmc(void)
 #endif
 	/* SDIO WLAN slot */
 #ifdef CONFIG_MMC_MSM_SDC2_SUPPORT
-	if (mmc_regulator_init(2, "mmc", 2850000))
-		return;
+//CONN-EC-Regulator-01-[
+//	if (mmc_regulator_init(2, "mmc", 2850000))
+//		return;
+//CONN-EC-Regulator-01-]
 	msm_add_sdcc(2, &sdc2_plat_data);
 #endif
 	/* Not Used */

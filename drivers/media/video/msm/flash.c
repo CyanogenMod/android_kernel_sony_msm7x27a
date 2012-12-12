@@ -863,9 +863,9 @@ int msm_soc_torch_trigger(void)
 
     // Enable HW Torch Mode and STROBE Input Enable
     rc = lm3561_mask_set(lm3561_client, CONFIGURATION1_REG, 0x84, 0x84);
-    /* FIH-SW3-MM-UW-flash tuning-00+*/
-    rc = lm3561_mask_set(lm3561_client, TORCH_BRIGHTNESS_REG, 0x07, 0x07); 
-    /* FIH-SW3-MM-UW-flash tuning-00-*/
+    /* FIH-SW3-MM-UW-flash tuning-04+*/
+    rc = lm3561_mask_set(lm3561_client, TORCH_BRIGHTNESS_REG, 0x07, 0x03);
+    /* FIH-SW3-MM-UW-flash tuning-04-*/
     if (rc<0)
     {
         printk("msm_soc_torch_trigger: case MSM_CAMERA_LED_LOW, Enable HW Torch Mode failed !\n");

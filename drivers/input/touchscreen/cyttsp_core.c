@@ -96,6 +96,12 @@
 #define SET_HSTMODE(reg, mode)      ((reg) & (mode))
 #define GET_HSTMODE(reg)            ((reg & 0x70) >> 4)
 #define GET_BOOTLOADERMODE(reg)     ((reg & 0x10) >> 4)
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++[*/
+#define GET_CHANGEMODEBIT(reg)     ((reg & 0x08) >> 3)
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++]*/
+/*FIH-MTD-PERIPHERAL-CH-ESD-04++[*/
+#define GET_ESDGSENSORBIT(reg)     (reg & 0x01)
+/*FIH-MTD-PERIPHERAL-CH-ESD-04++]*/
 
 /* maximum number of concurrent ST track IDs */
 #define CY_NUM_ST_TCH_ID            2
@@ -376,7 +382,15 @@ enum ts_state {
 };
 
 /*FIH-MTD-PERIPHERAL-CH-APP_VER-00++[*/
-static int TMA340_APP_ver=0;
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++[*/
+#ifdef CONFIG_FIH_MACH_TAMSUI_TAP
+static int TMA340_APP_ver=8;
+#elif defined(CONFIG_FIH_MACH_TAMSUI_MES)
+static int TMA340_APP_ver=6;
+#else
+static int TMA340_APP_ver=4;
+#endif
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++]*/
 module_param(
     TMA340_APP_ver, int, S_IRUGO
 );
@@ -628,9 +642,9 @@ static void handle_multi_touch(struct cyttsp_track_data *t, struct cyttsp *ts)
 		input_report_abs(ts->input, ABS_MT_WIDTH_MAJOR,
 						t->tool_width);*/
 		input_report_abs(ts->input, ABS_MT_TOUCH_MAJOR,
-					t->tool_width);/*FIH-MTD-PERIPHERAL-CH-TRACKING_ID-00++*/
+					t->cur_mt_z[id]);/*FIH-MTD-PERIPHERAL-CH-SIZE-00++*/
 		input_report_abs(ts->input, ABS_MT_PRESSURE,
-					t->cur_mt_z[id]);/*FIH-MTD-PERIPHERAL-CH-TRACKING_ID-00++*/
+					t->cur_mt_z[id]);/*FIH-MTD-PERIPHERAL-CH-SIZE-01++*/
 		input_report_abs(ts->input, ABS_MT_POSITION_X,
 						t->cur_mt_pos[id][CY_XPOS]);
 		input_report_abs(ts->input, ABS_MT_POSITION_Y,
@@ -1521,9 +1535,14 @@ static int cyttsp_set_sysinfo_mode(struct cyttsp *ts)
 		(tries++ < (500/20)));
 
 /*FIH-MTD-PERIPHERAL-CH-APP_VER-00++[*/	
-	temp_ver=ts->sysinfo_data.app_verh;
-	TMA340_APP_ver|=temp_ver<<8;
-	TMA340_APP_ver|=ts->sysinfo_data.app_verl;
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++[*/
+	if(ts->sysinfo_data.app_verl != 0)
+	{
+		temp_ver=ts->sysinfo_data.app_verh;
+		TMA340_APP_ver=temp_ver<<8;/*FIH-MTD-PERIPHERAL-CH-Change_Mode-01++*/
+		TMA340_APP_ver|=ts->sysinfo_data.app_verl;
+	}
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++]*/
 /*FIH-MTD-PERIPHERAL-CH-APP_VER-00++]*/
 	DBG_INFO("%s: read tries=%d\n", __func__, tries);
 
@@ -1776,6 +1795,12 @@ static int cyttsp_power_on(struct cyttsp *ts)
 	u8 data = 0;
 #endif
 /*FIH-MTD-PERIPHERAL-CH-ESD-01++]*/
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++[*/
+#ifdef CYTTSP_CM_bit
+	int retry=0;
+	u8  CM_BYTE=0;
+#endif
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++]*/
 
 	DBG_INFO("%s: Enter\n", __func__);
 
@@ -1805,10 +1830,36 @@ static int cyttsp_power_on(struct cyttsp *ts)
 
 	/* switch to System Information mode to read */
 	/* versions and set interval registers */
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++[*/
+#ifdef CYTTSP_CM_bit
+	retval=cyttsp_rd_reg(ts, CY_REG_BASE, &CM_BYTE);
+	if(retval<0)
+		goto bypass;
+	msleep(28);
+	CM_BYTE |= 0x08;
+	retval=cyttsp_wr_reg(ts, CY_REG_BASE, CM_BYTE);
+	if(retval<0)
+		goto bypass;
+	do{
+	msleep(28);
 	retval = cyttsp_set_sysinfo_mode(ts);
 	if (retval < 0)
 		goto bypass;
-
+	msleep(28);
+	retval=cyttsp_rd_reg(ts, CY_REG_BASE, &CM_BYTE);
+	DBG_INFO("%s:CM_BYTE=%x,retval=%d\r\n",__func__,CM_BYTE,retval);
+	retry++;
+	}while(retry < 5 && ((GET_CHANGEMODEBIT(CM_BYTE)==1)|| retval<0 ));
+	DBG_INFO("%s:CM_BYTE=%x,retry=%d\r\n",__func__,CM_BYTE,retry);
+	msleep(28);
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-01++[*/
+#else
+	retval = cyttsp_set_sysinfo_mode(ts);
+	if (retval < 0)
+		goto bypass;
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-01++]*/
+#endif
+/*FIH-MTD-PERIPHERAL-CH-Change_Mode-00++]*/
 	retval = cyttsp_set_sysinfo_regs(ts);
 	if (retval < 0)
 		goto bypass;
@@ -2810,7 +2861,6 @@ int TOUCH_ESD_WORKAROUND(int enable)
 	mutex_lock(&g_ts.mutex);/*FIH-MTD-PERIPHERAL-CH-ESD-02++*/
 	if(enable == CY_FACE_DOWN && ESD==false /*&& g_ts!=NULL*/)
 	{
-		ESD=true;
 		retval = cyttsp_rd_reg(&g_ts, cmd, &data);
 		if (retval < 0) {
 			DBG_ERR("%s: Failed read block data, err:%d\n",
@@ -2818,19 +2868,37 @@ int TOUCH_ESD_WORKAROUND(int enable)
 			goto ESD_fail;
 		}
 		DBG_MSG(KERN_INFO"%s: ENABLE ESD write data=%x...\n", __func__,data);
-		if((data & 0x1) == 0)
+		/*FIH-MTD-PERIPHERAL-CH-ESD-04++[*/
+		if((data & 0x10) != 0)
 		{
-			data|=0x01;
-			cyttsp_wr_reg(&g_ts, cmd, data);
-			ESD_status=data;
-			DBG_INFO(KERN_INFO"%s: ESD write data=%x ESD_status=%x...\n", __func__,data,ESD_status);
+			if((data & 0x1) == 0)
+			{
+				int retry=0;
+				do{
+					data|=0x01;
+					cyttsp_wr_reg(&g_ts, cmd, data);
+					msleep(20);
+					retval = cyttsp_rd_reg(&g_ts, cmd, &data);
+					/*DBG_INFO(KERN_INFO"%s: ESD write data=%x ESD_status=%x...\n", __func__,data,ESD_status);*/
+					DBG_INFO(KERN_INFO"%s: ESD read after write data=%x retry=%d...\n", __func__,data,retry);
+					retry++;
+				}while(((GET_ESDGSENSORBIT(data)==0)&&(retry < 3))||(retval<0));
+				if(GET_ESDGSENSORBIT(data)==1)
+				{
+					ESD=true;
+					ESD_status=data;
+					DBG_INFO(KERN_INFO"%s: ESD write data=%x ...\n", __func__,data);
+				}
+			}
+			else
+				DBG_MSG(KERN_INFO"%s: ENABLE ESD bit is already set...\n", __func__);
 		}
 		else
-			DBG_MSG(KERN_INFO"%s: ENABLE ESD bit is already set...\n", __func__);
+			DBG_INFO(KERN_INFO"%s: The TOUCH IC is not ready to write enableESD(%x)...\n", __func__,data);
+		/*FIH-MTD-PERIPHERAL-CH-ESD-03++]*/
 	}
 	else if(enable == CY_FACE_UP && ESD==true /*&& g_ts!=NULL*/)
 	{
-		ESD=false;
 		retval = cyttsp_rd_reg(&g_ts, cmd, &data);
 		if (retval < 0) {
 			DBG_ERR("%s: Failed read block data, err:%d\n",
@@ -2838,15 +2906,33 @@ int TOUCH_ESD_WORKAROUND(int enable)
 			goto ESD_fail;
 		}
 		DBG_MSG(KERN_INFO"%s: DISABLE ESD write data=%x...\n", __func__,data);
-		if((data & 0x1) != 0)
+		/*FIH-MTD-PERIPHERAL-CH-ESD-03++[*/
+		if((data & 0x10) != 0)
 		{
-			data&=0xFE;
-			cyttsp_wr_reg(&g_ts, cmd, data);
-			ESD_status=data;
-			DBG_INFO(KERN_INFO"%s: ESD write data=%x ESD_status=%x...\n", __func__,data,ESD_status);
+			if((data & 0x1) != 0)
+			{
+				int retry=0;
+				do{
+					data&=0xFE;
+					cyttsp_wr_reg(&g_ts, cmd, data);
+					msleep(20);
+					retval = cyttsp_rd_reg(&g_ts, cmd, &data);
+					DBG_INFO(KERN_INFO"%s: ESD read after write data=%x retry=%d...\n", __func__,data,retry);
+					retry++;
+				}while(((GET_ESDGSENSORBIT(data)==1)&&(retry < 3))||(retval<0));
+				if(GET_ESDGSENSORBIT(data)==0)
+				{
+					ESD=false;
+					ESD_status=data;
+					DBG_INFO(KERN_INFO"%s: ESD write data=%x ESD_status=%x...\n", __func__,data,ESD_status);
+				}
+			}
+			else
+				DBG_MSG(KERN_INFO"%s: DISABLE ESD bit is already set...\n", __func__);
 		}
 		else
-			DBG_MSG(KERN_INFO"%s: DISABLE ESD bit is already set...\n", __func__);
+			DBG_INFO(KERN_INFO"%s: The TOUCH IC is not ready to write disableESD(%x)...\n", __func__,data);
+		/*FIH-MTD-PERIPHERAL-CH-ESD-04++]*/
 		ret=0;
 	}
 	else if(enable == CY_PLUG_USB && ESD_USB==false)

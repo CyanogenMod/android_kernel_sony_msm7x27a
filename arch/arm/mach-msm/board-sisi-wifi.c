@@ -88,7 +88,7 @@ int sisi_get_host_wlan_irq(void)
   if(fih_get_product_phase() < Phase_SP2)
     return JLO_WL_HOST_WAKE;
   else
-  	return JLO_WL_HOST_WAKE_FIX;
+	return JLO_WL_HOST_WAKE_FIX;
   #else
     return -1;
   #endif
@@ -99,11 +99,12 @@ static int __init sisi_init_wifi_mem(void)
 {
 	int i;
 
+    printk(KERN_INFO "%s: dev_alloc_skb 4096*2/8192*2\n", __func__);  //MTD_CONN_EC_HOTSPOT-EnlargeStaticBuffer-01+
 	for(i=0;( i < WLAN_SKB_BUF_NUM );i++) {
 		if (i < (WLAN_SKB_BUF_NUM/2))
-			wlan_static_skb[i] = dev_alloc_skb(4096);
+			wlan_static_skb[i] = dev_alloc_skb(4096 * 2);   //MTD_CONN_EC_HOTSPOT-EnlargeStaticBuffer-01*
 		else
-			wlan_static_skb[i] = dev_alloc_skb(8192);
+			wlan_static_skb[i] = dev_alloc_skb(8192 * 2);   //MTD_CONN_EC_HOTSPOT-EnlargeStaticBuffer-01*
 	}
 	for(i=0;( i < PREALLOC_WLAN_NUMBER_OF_SECTIONS );i++) {
 		wifi_mem_array[i].mem_ptr = kmalloc(wifi_mem_array[i].size,

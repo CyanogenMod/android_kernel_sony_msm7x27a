@@ -87,11 +87,32 @@ int
 kgsl_sharedmem_map_vma(struct vm_area_struct *vma,
 			const struct kgsl_memdesc *memdesc);
 
+/* FIH-SW2-MM-KW-Google_patch-00+{ */
+static inline void *kgsl_sg_alloc(unsigned int size)
+{
+	if (size < PAGE_SIZE)
+		return kzalloc(size, GFP_KERNEL);
+	else
+		return vmalloc(size);
+}
+
+static inline void kgsl_sg_free(void *ptr, unsigned int size)
+{
+	if (size < PAGE_SIZE)
+		kfree(ptr);
+	else
+		vfree(ptr);
+	ptr = NULL;
+}
+/* FIH-SW2-MM-KW-Google_patch-00-} */
+
 static inline int
 memdesc_sg_phys(struct kgsl_memdesc *memdesc,
 		unsigned int physaddr, unsigned int size)
 {
-	memdesc->sg = vmalloc(sizeof(struct scatterlist) * 1);
+	/* FIH-SW2-MM-KW-Google_patch-00+{ */
+	memdesc->sg = kgsl_sg_alloc(sizeof(struct scatterlist) * 1);
+	/* FIH-SW2-MM-KW-Google_patch-00-} */
 	if (memdesc->sg == NULL)
 		return -ENOMEM;
 

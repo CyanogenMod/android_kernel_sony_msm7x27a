@@ -2,7 +2,7 @@
  * Gadget Function Driver for MTP
  *
  * Copyright (C) 2010 Google, Inc.
- * Copyright (C) 2011-2012 Foxconn International Holdings, Ltd. All rights reserved.
+ * Copyright(C) 2011-2012 Foxconn International Holdings, Ltd. All rights reserved.
  * Author: Mike Lockwood <lockwood@android.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -508,6 +508,13 @@ requeue_req:
 	req = dev->rx_req[0];
 	req->length = count;
 	dev->rx_done = 0;
+/*MTD-CONN-EH-RAMDUMP-00+{*/
+	if (dev->state == STATE_OFFLINE) {
+		r = -ENODEV;
+		goto done;
+	}
+/*MTD-CONN-EH-RAMDUMP-00+}*/
+
 	ret = usb_ep_queue(dev->ep_out, req, GFP_KERNEL);
 	if (ret < 0) {
 		r = -EIO;
@@ -730,7 +737,12 @@ static void send_file_work(struct work_struct *data) {
 		ret = usb_ep_queue(dev->ep_in, req, GFP_KERNEL);
 		if (ret < 0) {
 			DBG(cdev, "send_file_work: xfer error %d\n", ret);
+			//MTD-CONN-EH-MTPSWITCHING-00*{
+			//dev->state = STATE_ERROR;
+			if (dev->state != STATE_OFFLINE)
 			dev->state = STATE_ERROR;
+			//MTD-CONN-EH-MTPSWITCHING-00*}
+
 			r = -EIO;
 			break;
 		}
@@ -779,10 +791,20 @@ static void receive_file_work(struct work_struct *data)
 			read_req->length = (count > MTP_BULK_BUFFER_SIZE
 					? MTP_BULK_BUFFER_SIZE : count);
 			dev->rx_done = 0;
+/*MTD-CONN-EH-RAMDUMP-00+{*/
+			if (dev->state == STATE_OFFLINE) {
+				r = -ENODEV;
+				break;
+			}
+/*MTD-CONN-EH-RAMDUMP-00+}*/
 			ret = usb_ep_queue(dev->ep_out, read_req, GFP_KERNEL);
 			if (ret < 0) {
 				r = -EIO;
+				//MTD-CONN-EH-MTPSWITCHING-00*{
+				//dev->state = STATE_ERROR;
+				if (dev->state != STATE_OFFLINE)
 				dev->state = STATE_ERROR;
+				//MTD-CONN-EH-MTPSWITCHING-00*}
 				break;
 			}
 		}
@@ -794,7 +816,12 @@ static void receive_file_work(struct work_struct *data)
 			DBG(cdev, "vfs_write %d\n", ret);
 			if (ret != write_req->actual) {
 				r = -EIO;
+				//MTD-CONN-EH-MTPSWITCHING-00*{
+				//dev->state = STATE_ERROR;
+				if (dev->state != STATE_OFFLINE)
 				dev->state = STATE_ERROR;
+				//MTD-CONN-EH-MTPSWITCHING-00*}
+
 				break;
 			}
 			write_req = NULL;
@@ -1184,10 +1211,13 @@ mtp_function_unbind(struct usb_configuration *c, struct usb_function *f)
 	struct usb_request *req;
 	int i;
 
+        usb_ep_fifo_flush(dev->ep_in); //MTD-CONN-EH-MTPSWITCHING-00+
 	while ((req = mtp_req_get(dev, &dev->tx_idle)))
 		mtp_request_free(req, dev->ep_in);
+	usb_ep_fifo_flush(dev->ep_out);//MTD-CONN-EH-MTPSWITCHING-00+
 	for (i = 0; i < RX_REQ_MAX; i++)
 		mtp_request_free(dev->rx_req[i], dev->ep_out);
+	usb_ep_fifo_flush(dev->ep_intr);//MTD-CONN-EH-MTPSWITCHING-00+
 	while ((req = mtp_req_get(dev, &dev->intr_idle)))
 		mtp_request_free(req, dev->ep_intr);
 	dev->state = STATE_OFFLINE;

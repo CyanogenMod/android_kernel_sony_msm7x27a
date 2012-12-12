@@ -164,6 +164,8 @@ struct msm_panel_info {
 	struct lcdc_panel_info lcdc;
 
 	struct mipi_panel_info mipi;
+/* FIH-SW-MM-VH-DISPLAY-40+ */
+	__u32 lcm_model;
 };
 
 #define MSM_FB_SINGLE_MODE_PANEL(pinfo)		\
@@ -185,21 +187,24 @@ struct msm_fb_panel_data {
 	int (*power_ctrl) (boolean enable);
 	struct platform_device *next;
 	int (*clk_func) (int enable);
-    /* FIH-SW-MM-VH-DISPLAY-01+[ */
-    #ifdef CONFIG_FIH_SW_DISPLAY_LCM_ID_CHECK
+/* FIH-SW-MM-VH-DISPLAY-40*[ */
+#if defined(CONFIG_FIH_SW_DISPLAY_LCM_ID_CHECK)
 	int (*get_id) (struct msm_fb_data_type *);
-    #endif
-    /* FIH-SW-MM-VH-DISPLAY-01+] */
-	/* FIH-SW-MM-VH-DISPLAY-18+[ */
+#endif
+
 #ifdef CONFIG_FIH_SW_DISPLAY_CABC
 	int (*set_cabc_mode) (char mode);
 #endif
-	/* FIH-SW-MM-VH-DISPLAY-18+] */
-/* FIH-SW-MM-VH-DISPLAY-21+[ */
+
 #ifdef CONFIG_FIH_SW_DISPLAY_LCM_DIMMING
 	int (*set_dimming) (char enable);
 #endif
-/* FIH-SW-MM-VH-DISPLAY-18+] */
+
+#ifdef CONFIG_FIH_SW_DISPLAY_AUO_LCM_HEALTHY_CHECK
+	int (*get_healthy) (struct msm_fb_data_type *);
+#endif
+/* FIH-SW-MM-VH-DISPLAY-40*] */
+
 };
 
 /*===========================================================================

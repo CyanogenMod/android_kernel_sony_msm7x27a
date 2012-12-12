@@ -638,7 +638,10 @@ static int rndis_query_response(int configNr, rndis_query_msg_type *buf)
 	r = rndis_add_response(configNr,
 		sizeof(oid_supported_list) + sizeof(rndis_query_cmplt_type));
 	if (!r)
+	{
+		printk(KERN_INFO "RNDIS: rndis_query_response need more memory...");/*MTD-CONN-EH-RNDIS-LOG-00+*/
 		return -ENOMEM;
+		}
 	resp = (rndis_query_cmplt_type *)r->buf;
 
 	resp->MessageType = cpu_to_le32(REMOTE_NDIS_QUERY_CMPLT);
@@ -838,6 +841,7 @@ int rndis_msg_parser(u8 configNr, u8 *buf)
 	/* For USB: responses may take up to 10 seconds */
 	switch (MsgType) {
 	case REMOTE_NDIS_INITIALIZE_MSG:
+		printk(KERN_INFO "RNDIS: REMOTE_NDIS_INITIALIZE_MSG");/*MTD-CONN-EH-RNDIS-LOG-00+*/
 		pr_debug("%s: REMOTE_NDIS_INITIALIZE_MSG\n",
 			__func__);
 		params->state = RNDIS_INITIALIZED;
@@ -845,6 +849,7 @@ int rndis_msg_parser(u8 configNr, u8 *buf)
 					(rndis_init_msg_type *)buf);
 
 	case REMOTE_NDIS_HALT_MSG:
+		printk(KERN_INFO "RNDIS: REMOTE_NDIS_HALT_MSG");/*MTD-CONN-EH-RNDIS-LOG-00+*/
 		pr_debug("%s: REMOTE_NDIS_HALT_MSG\n",
 			__func__);
 		params->state = RNDIS_UNINITIALIZED;
@@ -859,16 +864,19 @@ int rndis_msg_parser(u8 configNr, u8 *buf)
 					(rndis_query_msg_type *)buf);
 
 	case REMOTE_NDIS_SET_MSG:
+		printk(KERN_INFO "RNDIS: REMOTE_NDIS_SET_MSG");/*MTD-CONN-EH-RNDIS-LOG-00+*/
 		return rndis_set_response(configNr,
 					(rndis_set_msg_type *)buf);
 
 	case REMOTE_NDIS_RESET_MSG:
+		printk(KERN_INFO "RNDIS: REMOTE_NDIS_RESET_MSG");/*MTD-CONN-EH-RNDIS-LOG-00+*/
 		pr_debug("%s: REMOTE_NDIS_RESET_MSG\n",
 			__func__);
 		return rndis_reset_response(configNr,
 					(rndis_reset_msg_type *)buf);
 
 	case REMOTE_NDIS_KEEPALIVE_MSG:
+		printk(KERN_INFO "RNDIS: REMOTE_NDIS_KEEPALIVE_MSG");/*MTD-CONN-EH-RNDIS-LOG-00+*/
 		/* For USB: host does this every 5 seconds */
 		if (rndis_debug > 1)
 			pr_debug("%s: REMOTE_NDIS_KEEPALIVE_MSG\n",
